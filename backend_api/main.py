@@ -103,14 +103,15 @@ def analyze_image_with_gemini(image_bytes: bytes) -> dict:
         except Exception as e:
             print(f"Error listando modelos: {e}")
 
-        # Usar el nombre exacto que aparece en los logs: 'models/gemini-1.5-flash-latest'
-        model_name = 'models/gemini-1.5-flash-latest'
+        # Usar el nombre EXACTO que vimos en los logs del usuario
+        model_name = 'models/gemini-flash-latest'
         try:
             model = genai.GenerativeModel(model_name)
             print(f"✅ Usando modelo: {model_name}")
         except Exception as e:
             print(f"⚠️ Error al cargar {model_name}: {e}")
-            model = genai.GenerativeModel('models/gemini-1.5-pro-latest')
+            # Fallback al otro modelo que vimos en la lista
+            model = genai.GenerativeModel('models/gemini-pro-latest')
         
         prompt = """
         Analiza este documento médico (imagen). Extrae la información clínica relevante y devuélvela EXCLUSIVAMENTE en formato JSON válido con la siguiente estructura exacta.
