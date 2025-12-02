@@ -59,9 +59,9 @@ export default function DashboardPage() {
     return [
       { label: "Pacientes en panel", value: total },
       { label: "Pacientes con alertas", value: withAlerts },
-      { label: "Rol activo", value: user?.role === "medico" ? "Médico" : "Paciente" },
+      { label: "Rol activo", value: user ? (user.role === "medico" ? "Médico" : "Paciente") : "Cargando..." },
     ];
-  }, [patients.length, user?.role, patients]);
+  }, [patients.length, user, patients]);
 
   const handleCreatePatient = async () => {
     setCreateError(null);

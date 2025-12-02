@@ -63,7 +63,8 @@ export async function createPatient(payload: {
 }
 
 export async function fetchPatientSummary(id: string): Promise<PatientDetail> {
-  const response = await fetch(`${API_BASE}/patients/${id}/summary`, {
+  const cleanId = id.trim();
+  const response = await fetch(`${API_BASE}/patients/${cleanId}/summary`, {
     cache: "no-store",
   });
   return handleResponse<PatientDetail>(response);

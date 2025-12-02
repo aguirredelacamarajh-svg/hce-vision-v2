@@ -2,11 +2,11 @@ import Link from "next/link";
 import { fetchPatientSummary } from "../../../../lib/api";
 
 type PageProps = {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 };
 
 export default async function PatientDetailPage({ params }: PageProps) {
-  const patientId = params.id;
+  const { id: patientId } = await params;
 
   let summary;
   try {
