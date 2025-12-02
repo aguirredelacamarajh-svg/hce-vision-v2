@@ -1,18 +1,14 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 type Role = "medico" | "paciente";
 
-const MED_CODE = "MED-ACCESS";
-
 export default function LoginPage() {
   const router = useRouter();
   const [role, setRole] = useState<Role>("medico");
-  const [doctorCode, setDoctorCode] = useState("");
-  const [patientName, setPatientName] = useState("");
-  const [patientDni, setPatientDni] = useState("");
+  const [username, setUsername] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -20,44 +16,36 @@ export default function LoginPage() {
 
   const subtitle = useMemo(() => {
     return isDoctor
-      ? "Panel seguro para médicos. Usa tu código de acceso temporal."
+      ? "Panel seguro para médicos. Autenticación simple para la demo."
       : "Identifícate como paciente para ver tu resumen y subir documentos.";
   }, [isDoctor]);
+
+  useEffect(() => {
+    const stored = typeof window !== "undefined" ? localStorage.getItem("hce_user") : null;
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored) as { username?: string; role?: Role };
+        if (parsed?.username) setUsername(parsed.username);
+        if (parsed?.role) setRole(parsed.role);
+      } catch (_) {
+        // ignore malformed
+      }
+    }
+  }, []);
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
     setError(null);
 
-    if (isDoctor) {
-      if (doctorCode.trim().length === 0) {
-        setError("Ingresa tu código de acceso.");
-        return;
-      }
-      if (doctorCode.trim() !== MED_CODE) {
-        setError("Código inválido. Usa el código demo: MED-ACCESS");
-        return;
-      }
-    } else {
-      if (patientName.trim().length < 3) {
-        setError("Ingresa tu nombre completo.");
-        return;
-      }
-      if (patientDni.trim().length < 5) {
-        setError("Ingresa tu DNI (mínimo 5 dígitos).");
-        return;
-      }
+    if (username.trim().length < 3) {
+      setError("Ingresa tu nombre o usuario (mínimo 3 caracteres).");
+      return;
     }
 
     setLoading(true);
-    const params = new URLSearchParams();
-    params.set("role", role);
-    if (isDoctor) {
-      params.set("user", "medico_demo");
-    } else {
-      params.set("user", patientName.trim());
-      params.set("dni", patientDni.trim());
-    }
-    router.push(`/dashboard?${params.toString()}`);
+    const data = { username: username.trim(), role };
+    localStorage.setItem("hce_user", JSON.stringify(data));
+    router.push("/dashboard");
   };
 
   return (
@@ -91,12 +79,12 @@ export default function LoginPage() {
             <h1 className="text-4xl font-semibold leading-tight tracking-tight text-slate-900">
               Inicia sesión según tu rol.
             </h1>
-            <p className="text-lg text-slate-600">{subtitle}</p>
+              <p className="text-lg text-slate-600">{subtitle}</p>
             <div className="rounded-2xl border border-slate-100 bg-white/80 p-4 shadow-sm shadow-sky-50">
               <p className="text-sm font-semibold text-slate-800">Demo rápida</p>
               <p className="text-sm text-slate-600">
-                Médico usa código <span className="font-semibold">MED-ACCESS</span>. Paciente solo ingresa su
-                nombre y DNI (sin verificación real). Próximamente conectaremos autenticación completa.
+                Login simulado: guarda tu usuario/rol en localStorage y redirige al dashboard. Próximamente
+                conectaremos autenticación completa con FastAPI.
               </p>
             </div>
           </div>
@@ -125,44 +113,17 @@ export default function LoginPage() {
               </div>
 
               <form onSubmit={handleSubmit} className="space-y-4">
-                {isDoctor ? (
-                  <div className="space-y-2">
-                    <label className="text-sm font-semibold text-slate-800">
-                      Código de acceso
-                    </label>
-                    <input
-                      value={doctorCode}
-                      onChange={(e) => setDoctorCode(e.target.value)}
-                      placeholder="Ej: MED-ACCESS"
-                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none transition focus:border-sky-500 focus:bg-white"
-                    />
-                  </div>
-                ) : (
-                  <>
-                    <div className="space-y-2">
-                      <label className="text-sm font-semibold text-slate-800">
-                        Nombre y apellido
-                      </label>
-                      <input
-                        value={patientName}
-                        onChange={(e) => setPatientName(e.target.value)}
-                        placeholder="Ej: Ana López"
-                        className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none transition focus:border-sky-500 focus:bg-white"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-sm font-semibold text-slate-800">
-                        DNI / Documento
-                      </label>
-                      <input
-                        value={patientDni}
-                        onChange={(e) => setPatientDni(e.target.value)}
-                        placeholder="Ej: 45899321"
-                        className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none transition focus:border-sky-500 focus:bg-white"
-                      />
-                    </div>
-                  </>
-                )}
+                <div className="space-y-2">
+                  <label className="text-sm font-semibold text-slate-800">
+                    {isDoctor ? "Usuario o nombre" : "Nombre y apellido"}
+                  </label>
+                  <input
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    placeholder={isDoctor ? "Ej: dr.garcia" : "Ej: Ana López"}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none transition focus:border-sky-500 focus:bg-white"
+                  />
+                </div>
 
                 {error && (
                   <div className="flex items-center gap-2 rounded-xl bg-red-50 px-3 py-3 text-sm font-semibold text-red-700 ring-1 ring-red-100">
@@ -180,8 +141,8 @@ export default function LoginPage() {
                 </button>
 
                 <p className="text-xs text-slate-500">
-                  Esta vista es una demo: no almacenamos credenciales y no hay verificación real de identidad.
-                  Pronto conectaremos autenticación completa con el backend FastAPI.
+                  Demo sin autenticación real. Guardamos tu usuario/rol en localStorage y te redirigimos al
+                  dashboard. Próximamente conectaremos autenticación completa con el backend FastAPI.
                 </p>
               </form>
             </div>
