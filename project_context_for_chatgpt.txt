@@ -1,0 +1,2232 @@
+================================================================================
+FILE: backend_api/main.py
+================================================================================
+import datetime
+import os
+import json
+from typing import List, Dict, Optional, Any
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+import uvicorn
+import google.generativeai as genai
+
+from models import (
+    PatientSummary, 
+    ClinicalEvent, 
+    Demographics, 
+    RiskScores, 
+    Medication, 
+    ScoreDetail, 
+    ClinicalEventResponse,
+    ExtractedData,
+    SubmitAnalysisRequest,
+    CreatePatientRequest,
+    LipidManagement,
+    LabResult
+)
+from database import init_db, save_patient, get_patient
+
+app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], # Permitir cualquier origen (Web, Móvil, etc.)
+    allow_credentials=True,
+    allow_methods=["*"], # Permitir GET, POST, OPTIONS, etc.
+    allow_headers=["*"], # Permitir cualquier header
+)
+
+# Inicializar BD al arrancar
+init_db()
+
+# --- Configuración Gemini ---
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") or "AIzaSyCS17QJUll-sS8boZJkWlcJFNAeZb0ga30"
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+
+# --- Lógica de Negocio ---
+
+def get_or_create_patient_summary(patient_id: str) -> PatientSummary:
+    """Recupera el estado del paciente o lo inicializa si no existe."""
+    # 1. Intentar recuperar de la BD
+    summary = get_patient(patient_id)
+    
+    if summary:
+        return summary
+        
+    # 2. Si no existe, crear uno nuevo (Mock inicial)
+    new_summary = PatientSummary(
+        patient_id=patient_id,
+        demographics=Demographics(
+            name="Juan Pérez", 
+            age=65,
+            sex="M"
+        ),
+        timeline=[],
+        medications=[],
+        risk_scores=RiskScores(),
+        clinical_summary="Paciente nuevo registrado.",
+        alerts=[]
+    )
+    
+    # Guardar el nuevo paciente en la BD
+    save_patient(new_summary)
+    
+    return new_summary
+
+def fake_llm_extract(text: str) -> dict:
+    return {
+        "date": datetime.date.today().isoformat(),
+        "type": "laboratorio",
+        "title": "Análisis Simulado (Fallback)",
+        "description": "No se pudo conectar con la IA real. Se muestran datos de ejemplo.",
+        "antecedents": {"hta": True, "diabetes": False},
+        "labs": {},
+        "medications": []
+    }
+
+def analyze_image_with_gemini(image_bytes: bytes) -> dict:
+    """
+    Envía la imagen a Gemini 1.5 Flash para extracción estructurada de datos clínicos.
+    """
+    if not GEMINI_API_KEY:
+        print("⚠️ ADVERTENCIA: GEMINI_API_KEY no encontrada. Usando datos simulados.")
+        return fake_llm_extract("simulated")
+
+    try:
+        # Usamos 'gemini-flash-latest' que apareció explícitamente en tu lista de modelos disponibles
+        model = genai.GenerativeModel('gemini-flash-latest')
+        
+        prompt = """
+        Analiza este documento médico (imagen). Extrae la información clínica relevante y devuélvela EXCLUSIVAMENTE en formato JSON válido con la siguiente estructura exacta.
+        
+        Estructura JSON requerida:
+        {
+            "date": "YYYY-MM-DD", // Fecha del documento. Si no hay, usa la fecha de hoy.
+            "type": "laboratorio" | "imagen" | "medicacion" | "epicrisis" | "procedimiento" | "consulta" | "otro",
+            "title": "Título breve (ej. Perfil Lipídico, Ecocardiograma)",
+            "description": "Resumen conciso de hallazgos (máx 2 frases).",
+            "antecedents": {
+                "hta": boolean,
+                "diabetes": boolean,
+                "heart_failure": boolean, 
+                "atrial_fibrillation": boolean, // Fibrilación Auricular (Clave para CHA2DS2-VASc)
+                "acs_history": boolean, // Síndrome Coronario Agudo previo
+                "stroke": boolean, 
+                "vascular_disease": boolean,
+                "renal_disease": boolean,
+                "liver_disease": boolean,
+                "bleeding_history": boolean,
+                "labile_inr": boolean,
+                "alcohol_drugs": boolean,
+                "smoking": boolean, // Tabaquismo actual
+                "obesity": boolean,
+                "sedentary": boolean,
+                "dyslipidemia": boolean
+            },
+            "labs": {
+                // Extraer OBJETO con valor y unidad. Si no está, usa null.
+                "ldl": { "value": number, "unit": "string" } | null, 
+                "hdl": { "value": number, "unit": "string" } | null,
+                "total_cholesterol": { "value": number, "unit": "string" } | null,
+                "triglycerides": { "value": number, "unit": "string" } | null,
+                "creatinine": { "value": number, "unit": "string" } | null,
+                "bnp": { "value": number, "unit": "string" } | null, // BNP o NT-proBNP
+                "hemoglobin": { "value": number, "unit": "string" } | null,
+                "hba1c": { "value": number, "unit": "string" } | null,
+                "potassium": { "value": number, "unit": "string" } | null
+            },
+            "historical_data": [
+                // BUSCA ACTIVAMENTE EN EL TEXTO Y TABLAS.
+                {
+                    "date": "YYYY-MM-DD", 
+                    "labs": { 
+                        "ldl": { "value": number, "unit": "string" },
+                        "bnp": { "value": number, "unit": "string" }
+                        // ... otros
+                    }
+                }
+            ],
+            "medications": ["Nombre Medicamento 1", "Nombre Medicamento 2"]
+        }
+        """
+
+        # Crear el contenido para el modelo (Prompt + Imagen)
+        response = model.generate_content([
+            {'mime_type': 'image/jpeg', 'data': image_bytes},
+            prompt
+        ])
+        
+        # Limpiar la respuesta para obtener solo el JSON
+        text_response = response.text.strip()
+        if text_response.startswith("```json"):
+            text_response = text_response[7:]
+        if text_response.endswith("```"):
+            text_response = text_response[:-3]
+            
+        return json.loads(text_response)
+
+    except Exception as e:
+        print(f"❌ Error llamando a Gemini: {e}")
+        return fake_llm_extract("error_fallback")
+
+def calculate_lipid_management(age: int, antecedents: dict, ldl_val: Optional[float]) -> Optional[LipidManagement]:
+    """Calcula metas de LDL y recomendación de estatinas según riesgo cardiovascular (ESC Guidelines)."""
+    if ldl_val is None:
+        return None
+
+    # 1. Determinar Categoría de Riesgo
+    risk_cat = "Bajo"
+    target = 116.0
+    
+    # Definiciones simplificadas
+    has_acs = antecedents.get("acs_history")
+    has_stroke = antecedents.get("stroke")
+    has_cvd = antecedents.get("vascular_disease") or has_acs or has_stroke
+    has_dm = antecedents.get("diabetes")
+    has_ckd = antecedents.get("renal_disease")
+    has_fh = antecedents.get("dyslipidemia") 
+    
+    # Lógica de Riesgo
+    if has_acs and (has_dm or has_ckd or antecedents.get("smoking")):
+         # Paciente con evento previo + comorbilidad mayor -> Riesgo Extremo (No oficial ESC pero usado clínicamente)
+         risk_cat = "Extremo"
+         target = 40.0
+    elif has_cvd:
+        risk_cat = "Muy Alto"
+        target = 55.0
+    elif has_dm or has_ckd or has_fh:
+        risk_cat = "Alto"
+        target = 70.0
+    elif age > 50 and (antecedents.get("hta") or antecedents.get("smoking") or antecedents.get("obesity")):
+        risk_cat = "Moderado"
+        target = 100.0
+    
+    # 2. Calcular reducción necesaria
+    reduction_pct = 0.0
+    if ldl_val > target:
+        reduction_pct = ((ldl_val - target) / ldl_val) * 100
+    
+    # 3. Estrategia Terapéutica (Estatinas)
+    recommendation = "Estilo de vida saludable."
+    
+    if reduction_pct > 0:
+        if reduction_pct >= 50:
+            recommendation = "Estatina Alta Potencia:\n• Atorvastatina 40-80 mg\n• Rosuvastatina 20-40 mg\n(Considerar Ezetimibe si no alcanza meta)"
+        elif reduction_pct >= 30:
+            recommendation = "Estatina Moderada Potencia:\n• Atorvastatina 10-20 mg\n• Rosuvastatina 5-10 mg"
+        else:
+            recommendation = "Estatina Baja-Moderada Potencia."
+            
+    if ldl_val <= target:
+        recommendation = "Meta alcanzada. Mantener tratamiento actual."
+
+    return LipidManagement(
+        ldl_current=ldl_val,
+        risk_category=risk_cat,
+        ldl_target=target,
+        reduction_needed_pct=round(reduction_pct, 1),
+        recommendation=recommendation
+    )
+
+def calculate_scores(age: int, sex: str, antecedents: dict, labs: dict = {}) -> Dict[str, Any]:
+    """Calcula scores condicionales según patología."""
+    
+    scores = {}
+    details = {}
+
+    # --- 1. Fibrilación Auricular (CHA2DS2-VASc & HAS-BLED) ---
+    if antecedents.get("atrial_fibrillation"):
+        # CHA2DS2-VASc
+        cha = 0
+        if antecedents.get("heart_failure"): cha += 1
+        if antecedents.get("hta"): cha += 1
+        if age >= 75: cha += 2
+        elif age >= 65: cha += 1
+        if antecedents.get("diabetes"): cha += 1
+        if antecedents.get("stroke"): cha += 2
+        if antecedents.get("vascular_disease"): cha += 1
+        if sex == 'F': cha += 1
+        
+        risk_txt = "Alto Riesgo (Anticoagular)" if cha >= 2 else ("Considerar Anticoagulación" if cha == 1 else "Bajo Riesgo")
+        scores["chads2vasc"] = cha
+        details["CHA2DS2-VASc"] = ScoreDetail(value=cha, risk=risk_txt)
+
+        # HAS-BLED
+        hb = 0
+        if antecedents.get("hta"): hb += 1
+        if antecedents.get("renal_disease"): hb += 1
+        if antecedents.get("liver_disease"): hb += 1
+        if antecedents.get("stroke"): hb += 1
+        if antecedents.get("bleeding_history"): hb += 1
+        if antecedents.get("labile_inr"): hb += 1
+        if age > 65: hb += 1
+        if antecedents.get("alcohol_drugs"): hb += 1
+        
+        hb_risk = "Alto Riesgo Sangrado" if hb >= 3 else "Bajo Riesgo Sangrado"
+        scores["has_bled"] = hb
+        details["HAS-BLED"] = ScoreDetail(value=hb, risk=hb_risk)
+
+    # --- 2. Prevención Primaria (SCORE2) ---
+    # Solo si NO tiene enfermedad cardiovascular establecida
+    # SCORE2 (Riesgo a 10 años) - Simplificado
+    # En la práctica real, usaríamos tablas calibradas por región.
+    # Aquí usamos una aproximación basada en edad, tabaquismo y presión.
+    score2_val = None
+    if 40 <= age <= 69: # SCORE2 es válido en este rango
+        base_risk = 1.0
+        if antecedents.get("smoking"): base_risk *= 2.0
+        if antecedents.get("diabetes"): base_risk *= 1.5
+        if antecedents.get("hta"): base_risk *= 1.3
+        
+        # Ajuste por edad (exponencial simple para demo)
+        age_factor = (age - 40) / 10.0
+        score2_val = round(base_risk * (1 + age_factor), 1)
+        
+        risk_label = "Bajo"
+        if score2_val >= 10: risk_label = "Muy Alto"
+        elif score2_val >= 5: risk_label = "Alto"
+        elif score2_val >= 2.5: risk_label = "Moderado"
+        
+        scores["score2"] = score2_val
+        details["SCORE2"] = ScoreDetail(value=score2_val, risk=risk_label)
+
+    # --- 3. Manejo de Lípidos ---
+    ldl_data = labs.get("ldl")
+    ldl_val = None
+    
+    if isinstance(ldl_data, dict) and "value" in ldl_data:
+        ldl_val = ldl_data["value"]
+    elif isinstance(ldl_data, (int, float)):
+        ldl_val = float(ldl_data)
+        
+    lipid_mgmt = calculate_lipid_management(age, antecedents, ldl_val)
+    if lipid_mgmt:
+        scores["lipid_management"] = lipid_mgmt
+
+    return {
+        "scores": scores,
+        "details": details
+    }
+
+# --- Endpoints ---
+
+@app.post("/patients", response_model=PatientSummary)
+async def create_patient(data: CreatePatientRequest):
+    """
+    Crea un nuevo paciente o devuelve uno existente si el nombre coincide.
+    """
+    from database import get_all_patients
+    
+    # 1. Buscar si ya existe alguien con ese nombre (búsqueda simple)
+    all_patients = get_all_patients()
+    for p in all_patients.values():
+        if p.demographics.name.lower().strip() == data.name.lower().strip():
+            return p
+
+    # 2. Si no existe, crear uno nuevo
+    import uuid
+    new_id = str(uuid.uuid4())
+    
+    new_summary = PatientSummary(
+        patient_id=new_id,
+        demographics=Demographics(
+            name=data.name,
+            age=data.age,
+            sex=data.sex
+        ),
+        timeline=[],
+        medications=[],
+        risk_scores=RiskScores(),
+        clinical_summary="Paciente registrado.",
+        alerts=[]
+    )
+    
+    save_patient(new_summary)
+    return new_summary
+
+@app.post("/extract_data", response_model=ExtractedData)
+async def extract_data(
+    patient_id: str = Form(...),
+    file: UploadFile = File(...)
+):
+    """
+    Paso 1: Analiza la imagen y devuelve los datos PROPUESTOS (sin guardar nada).
+    """
+    summary = get_or_create_patient_summary(patient_id)
+    content = await file.read()
+    raw_data = analyze_image_with_gemini(content)
+    
+    temp_event = ClinicalEvent(
+        id="temp_id", 
+        date=raw_data["date"] or datetime.date.today().isoformat(),
+        type=raw_data["type"] or "otro",
+        title=raw_data["title"] or "Documento Analizado",
+        description=raw_data["description"] or "",
+        labs=raw_data["labs"],
+        diagnostics=[],
+        source="IA (Pendiente)"
+    )
+
+    try:
+        scores_data = calculate_scores(
+            summary.demographics.age, 
+            summary.demographics.sex, 
+            raw_data["antecedents"] or {},
+            raw_data["labs"] or {}
+        )
+        
+        proposed_scores = RiskScores(
+            chads2vasc=scores_data["scores"].get("chads2vasc"),
+            has_bled=scores_data["scores"].get("has_bled"),
+            score2=scores_data["scores"].get("score2"),
+            details=scores_data["details"],
+            lipid_management=scores_data["scores"].get("lipid_management")
+        )
+    except Exception as e:
+        print(f"⚠️ Error calculando scores: {e}")
+        import traceback
+        traceback.print_exc()
+        proposed_scores = RiskScores() # Retornar vacío si falla
+
+    return ExtractedData(
+        event=temp_event,
+        medications=raw_data["medications"] or [],
+        antecedents=raw_data["antecedents"] or {},
+        risk_scores=proposed_scores,
+        historical_data=raw_data.get("historical_data", [])
+    )
+
+@app.post("/submit_analysis", response_model=PatientSummary)
+async def submit_analysis(data: SubmitAnalysisRequest):
+    """
+    Paso 2: Recibe los datos CONFIRMADOS/EDITADOS por el usuario y actualiza el estado.
+    """
+    summary = get_or_create_patient_summary(data.patient_id)
+    
+    new_event = data.event
+    new_event.id = f"evt_{len(summary.timeline) + 1:03d}"
+    new_event.source = "IA + Revisión Médica"
+    summary.timeline.insert(0, new_event)
+    
+    current_med_names = {m.name.lower() for m in summary.medications}
+    for med_name in data.medications:
+        if med_name.lower() not in current_med_names:
+            summary.medications.append(Medication(name=med_name, dose="TBD", schedule="TBD"))
+            current_med_names.add(med_name.lower())
+            
+    # Calcular scores finales usando los datos confirmados (incluyendo labs del evento si los hay)
+    # Nota: En una app real, deberíamos pasar los labs confirmados aquí. 
+    # Por ahora usaremos los del evento si existen.
+    event_labs = {}
+    if new_event.labs:
+        # Convertir labs del evento (que pueden ser strings) a formato numérico si es posible para el cálculo
+        # Esto es una simplificación. Idealmente SubmitAnalysisRequest tendría los labs estructurados.
+        pass 
+
+    scores_data = calculate_scores(
+        summary.demographics.age, 
+        summary.demographics.sex, 
+        data.antecedents,
+        new_event.labs or {} # Pasar los labs confirmados
+    )
+    
+    scores_values = scores_data["scores"]
+    
+    summary.risk_scores = RiskScores(
+        chads2vasc=scores_values.get("chads2vasc"),
+        has_bled=scores_values.get("has_bled"),
+        score2=scores_values.get("score2"),
+        details=scores_data["details"],
+        lipid_management=scores_values.get("lipid_management")
+    )
+    
+    # Guardar antecedentes confirmados
+    summary.antecedents = data.antecedents
+    
+    # --- ACTUALIZAR TENDENCIAS DE LABORATORIO ---
+    if new_event.labs:
+        for lab_name, lab_data in new_event.labs.items():
+            try:
+                val_float = None
+                unit_str = ""
+                
+                # Caso 1: Es un diccionario con 'value' y 'unit' (Nuevo formato)
+                if isinstance(lab_data, dict) and 'value' in lab_data:
+                    val_float = float(lab_data['value']) if lab_data['value'] is not None else None
+                    unit_str = lab_data.get('unit', "")
+                
+                # Caso 2: Es un número directo (Legacy)
+                elif isinstance(lab_data, (int, float)):
+                    val_float = float(lab_data)
+                
+                # Caso 3: Es un string sucio (Legacy)
+                elif isinstance(lab_data, str):
+                    import re
+                    match = re.search(r"[-+]?\d*\.\d+|\d+", lab_data)
+                    if match:
+                        val_float = float(match.group())
+
+                if val_float is not None:
+                    if lab_name not in summary.lab_trends:
+                        summary.lab_trends[lab_name] = []
+                    
+                    summary.lab_trends[lab_name].append(LabResult(
+                        date=new_event.date,
+                        value=val_float,
+                        unit=unit_str
+                    ))
+                    
+                    summary.lab_trends[lab_name].sort(key=lambda x: x.date)
+                    print(f"✅ Guardado Lab: {lab_name} = {val_float} {unit_str}")
+            except Exception as e:
+                print(f"⚠️ Error procesando lab {lab_name}: {e}")
+
+    # --- PROCESAR DATOS HISTÓRICOS (TABLAS) ---
+    if data.historical_data:
+        print(f"📜 Procesando {len(data.historical_data)} registros históricos...")
+        for record in data.historical_data:
+            if record.labs:
+                for lab_name, lab_data in record.labs.items():
+                    try:
+                        val_float = None
+                        unit_str = ""
+                        
+                        # Mismo parsing que arriba
+                        if isinstance(lab_data, dict) and 'value' in lab_data:
+                            val_float = float(lab_data['value']) if lab_data['value'] is not None else None
+                            unit_str = lab_data.get('unit', "")
+                        elif isinstance(lab_data, (int, float)):
+                            val_float = float(lab_data)
+                        
+                        if val_float is not None:
+                            if lab_name not in summary.lab_trends:
+                                summary.lab_trends[lab_name] = []
+                            
+                            summary.lab_trends[lab_name].append(LabResult(
+                                date=record.date,
+                                value=val_float,
+                                unit=unit_str
+                            ))
+                            print(f"   -> Histórico: {record.date} - {lab_name}: {val_float}")
+                    except:
+                        pass
+        
+        # Reordenar todo al final
+        for k in summary.lab_trends:
+            summary.lab_trends[k].sort(key=lambda x: x.date)
+
+    summary.clinical_summary = f"Paciente con {len(summary.timeline)} eventos. Último: {new_event.title}."
+    
+    # Alertas
+    if scores_values.get("chads2vasc", 0) >= 2 and data.antecedents.get("atrial_fibrillation"):
+        summary.alerts.append("Alto riesgo de ACV (FA) - Considerar Anticoagulación")
+        
+    lipid_mgmt = scores_values.get("lipid_management")
+    if lipid_mgmt and lipid_mgmt.risk_category in ["Alto", "Muy Alto", "Extremo"]:
+        summary.alerts.append(f"Dislipidemia de Riesgo {lipid_mgmt.risk_category}")
+
+    save_patient(summary)
+            
+    return summary
+
+@app.get("/patients/{patient_id}/summary", response_model=PatientSummary)
+async def get_patient_summary(patient_id: str):
+    """
+    Devuelve el estado completo (PatientSummary) de un paciente.
+    """
+    return get_or_create_patient_summary(patient_id)
+
+@app.get("/patients", response_model=List[PatientSummary])
+async def get_patients():
+    """
+    Devuelve la lista de todos los pacientes registrados en la BD.
+    """
+    from database import get_all_patients
+    patients_map = get_all_patients()
+    
+    # Si la BD está vacía, devolvemos al menos a Juan Pérez para que no se vea vacío
+    if not patients_map:
+        get_or_create_patient_summary("1") # Crea a Juan
+        patients_map = get_all_patients()
+        
+    return list(patients_map.values())
+    
+@app.delete("/patients/{patient_id}")
+async def delete_patient(patient_id: str):
+    """Elimina un paciente de la base de datos."""
+    from database import DB_NAME
+    import sqlite3
+    
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM patients WHERE id = ?", (patient_id,))
+    deleted_count = cursor.rowcount
+    conn.commit()
+    conn.close()
+    
+    if deleted_count > 0:
+        return {"message": "Paciente eliminado"}
+    
+    raise HTTPException(status_code=404, detail="Paciente no encontrado")
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8080)
+
+
+
+================================================================================
+FILE: backend_api/models.py
+================================================================================
+from typing import List, Dict, Optional, Any
+from pydantic import BaseModel
+
+class ScoreDetail(BaseModel):
+    value: float
+    risk: str
+
+
+
+class Medication(BaseModel):
+    name: str
+    dose: Optional[str] = None
+    schedule: Optional[str] = None
+    route: Optional[str] = None
+
+class ClinicalEvent(BaseModel):
+    id: str
+    date: str
+    type: str
+    title: str
+    description: str
+    source: str = "IA"
+    labs: Optional[Dict[str, Any]] = None
+    diagnostics: Optional[List[str]] = None
+
+class LabResult(BaseModel):
+    date: str
+    value: float
+    unit: str
+
+class LabTrend(BaseModel):
+    name: str # ej: "LDL", "Creatinina", "BNP"
+    history: List[LabResult]
+
+class LipidManagement(BaseModel):
+    ldl_current: Optional[float] = None
+    risk_category: str # "Bajo", "Moderado", "Alto", "Muy Alto", "Extremo"
+    ldl_target: float
+    reduction_needed_pct: float
+    recommendation: str # ej: "Iniciar Atorvastatina 40-80mg"
+
+class RiskScores(BaseModel):
+    chads2vasc: Optional[float] = None
+    has_bled: Optional[float] = None
+    score2: Optional[float] = None # Riesgo a 10 años
+    grace: Optional[float] = None # Para SCA
+    crusade: Optional[float] = None # Riesgo sangrado en SCA
+    details: Optional[Dict[str, ScoreDetail]] = None
+    lipid_management: Optional[LipidManagement] = None
+
+class Demographics(BaseModel):
+    name: str
+    age: int
+    sex: str
+
+class PatientSummary(BaseModel):
+    patient_id: str
+    demographics: Demographics
+    timeline: List[ClinicalEvent]
+    medications: List[Medication]
+    risk_scores: RiskScores
+    lab_trends: Dict[str, List[LabResult]] = {} # Mapa: "LDL" -> [Resultados]
+    risk_factors: List[str] = [] # "Tabaquismo", "Sedentarismo", "Obesidad"
+    antecedents: Dict[str, bool] = {} # Nuevo campo para guardar el estado completo
+    clinical_summary: str
+    alerts: List[str]
+
+class ClinicalEventResponse(BaseModel):
+    date: str
+    type: str
+    title: str
+    description: str
+    labs: Dict[str, Optional[str]]
+    diagnostics: List[str]
+    medications: List[str]
+
+class HistoricalLab(BaseModel):
+    date: str
+    labs: Dict[str, Any]
+
+class ExtractedData(BaseModel):
+    event: ClinicalEvent
+    medications: List[str]
+    antecedents: Dict[str, bool]
+    risk_scores: RiskScores
+    historical_data: List[HistoricalLab] = [] # Nuevo campo para tablas de datos
+
+class SubmitAnalysisRequest(BaseModel):
+    patient_id: str
+    event: ClinicalEvent
+    medications: List[str]
+    antecedents: Dict[str, bool]
+    historical_data: List[HistoricalLab] = [] # Nuevo campo
+
+class CreatePatientRequest(BaseModel):
+    name: str
+    age: int
+    sex: str
+
+
+
+================================================================================
+FILE: mobile_app/lib/models/patient_summary.dart
+================================================================================
+import 'clinical_event.dart';
+
+class LabResult {
+  final String date;
+  final double value;
+  final String unit;
+
+  LabResult({required this.date, required this.value, required this.unit});
+
+  factory LabResult.fromJson(Map<String, dynamic> json) {
+    return LabResult(
+      date: json['date'] ?? '',
+      value: (json['value'] as num?)?.toDouble() ?? 0.0,
+      unit: json['unit'] ?? '',
+    );
+  }
+}
+
+class PatientSummary {
+  final String patientId;
+  final Demographics demographics;
+  final List<ClinicalEvent> timeline;
+  final List<Medication> medications;
+  final RiskScores riskScores;
+  final String clinicalSummary;
+  final List<String> alerts;
+  final Map<String, List<LabResult>> labTrends;
+  final Map<String, bool> antecedents; // Nuevo campo
+
+  PatientSummary({
+    required this.patientId,
+    required this.demographics,
+    required this.timeline,
+    required this.medications,
+    required this.riskScores,
+    required this.clinicalSummary,
+    required this.alerts,
+    required this.labTrends,
+    required this.antecedents,
+  });
+
+  factory PatientSummary.fromJson(Map<String, dynamic> json) {
+    Map<String, List<LabResult>> trends = {};
+    if (json['lab_trends'] != null) {
+      (json['lab_trends'] as Map<String, dynamic>).forEach((key, value) {
+        trends[key] = (value as List).map((e) => LabResult.fromJson(e)).toList();
+      });
+    }
+
+    return PatientSummary(
+      patientId: json['patient_id'] ?? '',
+      demographics: Demographics.fromJson(json['demographics'] ?? {}),
+      timeline: (json['timeline'] as List?)
+              ?.map((e) => ClinicalEvent.fromJson(e))
+              .toList() ??
+          [],
+      medications: (json['medications'] as List?)
+              ?.map((e) => Medication.fromJson(e))
+              .toList() ??
+          [],
+      riskScores: RiskScores.fromJson(json['risk_scores'] ?? {}),
+      clinicalSummary: json['clinical_summary'] ?? '',
+      alerts: (json['alerts'] as List?)?.map((e) => e.toString()).toList() ?? [],
+      labTrends: trends,
+      antecedents: (json['antecedents'] as Map<String, dynamic>?)?.map(
+            (key, value) => MapEntry(key, value as bool),
+          ) ??
+          {},
+    );
+  }
+}
+
+class Demographics {
+  final String name;
+  final int age;
+  final String sex;
+
+  Demographics({required this.name, required this.age, required this.sex});
+
+  factory Demographics.fromJson(Map<String, dynamic> json) {
+    return Demographics(
+      name: json['name'] ?? 'Desconocido',
+      age: json['age'] ?? 0,
+      sex: json['sex'] ?? '?',
+    );
+  }
+}
+
+class Medication {
+  final String name;
+  final String? dose;
+  final String? schedule;
+  final String? route;
+
+  Medication({required this.name, this.dose, this.schedule, this.route});
+
+  factory Medication.fromJson(Map<String, dynamic> json) {
+    return Medication(
+      name: json['name'] ?? '',
+      dose: json['dose'],
+      schedule: json['schedule'],
+      route: json['route'],
+    );
+  }
+}
+
+class LipidManagement {
+  final double? ldlCurrent;
+  final String riskCategory;
+  final double ldlTarget;
+  final double reductionNeededPct;
+  final String recommendation;
+
+  LipidManagement({
+    this.ldlCurrent,
+    required this.riskCategory,
+    required this.ldlTarget,
+    required this.reductionNeededPct,
+    required this.recommendation,
+  });
+
+  factory LipidManagement.fromJson(Map<String, dynamic> json) {
+    return LipidManagement(
+      ldlCurrent: (json['ldl_current'] as num?)?.toDouble(),
+      riskCategory: json['risk_category'] ?? "Desconocido",
+      ldlTarget: (json['ldl_target'] as num? ?? 0).toDouble(),
+      reductionNeededPct: (json['reduction_needed_pct'] as num? ?? 0).toDouble(),
+      recommendation: json['recommendation'] ?? "",
+    );
+  }
+}
+
+class RiskScores {
+  final double? chads2vasc;
+  final double? hasBled;
+  final double? score2;
+  final Map<String, ScoreDetail>? details;
+  final LipidManagement? lipidManagement;
+
+  RiskScores({
+    this.chads2vasc,
+    this.hasBled,
+    this.score2,
+    this.details,
+    this.lipidManagement,
+  });
+
+  factory RiskScores.fromJson(Map<String, dynamic> json) {
+    Map<String, ScoreDetail>? detailsMap;
+    if (json['details'] != null) {
+      detailsMap = {};
+      (json['details'] as Map<String, dynamic>).forEach((key, value) {
+        detailsMap![key] = ScoreDetail.fromJson(value);
+      });
+    }
+
+    return RiskScores(
+      chads2vasc: (json['chads2vasc'] as num?)?.toDouble(),
+      hasBled: (json['has_bled'] as num?)?.toDouble(),
+      score2: (json['score2'] as num?)?.toDouble(),
+      details: detailsMap,
+      lipidManagement: json['lipid_management'] != null 
+          ? LipidManagement.fromJson(json['lipid_management']) 
+          : null,
+    );
+  }
+}
+
+class ScoreDetail {
+  final double value;
+  final String risk;
+
+  ScoreDetail({required this.value, required this.risk});
+
+  factory ScoreDetail.fromJson(Map<String, dynamic> json) {
+    return ScoreDetail(
+      value: (json['value'] as num?)?.toDouble() ?? 0.0,
+      risk: json['risk'] ?? '',
+    );
+  }
+}
+
+
+
+================================================================================
+FILE: mobile_app/lib/models/extraction_models.dart
+================================================================================
+import '../models/clinical_event.dart';
+import '../models/patient_summary.dart';
+
+class ExtractedData {
+  final ClinicalEvent event;
+  final List<String> medications;
+  final Map<String, bool> antecedents;
+  final RiskScores riskScores;
+  final List<Map<String, dynamic>> historicalData; // Nuevo
+
+  ExtractedData({
+    required this.event,
+    required this.medications,
+    required this.antecedents,
+    required this.riskScores,
+    required this.historicalData,
+  });
+
+  factory ExtractedData.fromJson(Map<String, dynamic> json) {
+    return ExtractedData(
+      event: ClinicalEvent.fromJson(json['event']),
+      medications: List<String>.from(json['medications'] ?? []),
+      antecedents: Map<String, bool>.from(json['antecedents'] ?? {}),
+      riskScores: RiskScores.fromJson(json['risk_scores'] ?? {}),
+      historicalData: List<Map<String, dynamic>>.from(json['historical_data'] ?? []),
+    );
+  }
+}
+
+class SubmitAnalysisRequest {
+  final String patientId;
+  final ClinicalEvent event;
+  final List<String> medications;
+  final Map<String, bool> antecedents;
+  final List<Map<String, dynamic>> historicalData; // Nuevo
+
+  SubmitAnalysisRequest({
+    required this.patientId,
+    required this.event,
+    required this.medications,
+    required this.antecedents,
+    required this.historicalData,
+  });
+
+  Map<String, dynamic> toJson() {
+    return {
+      'patient_id': patientId,
+      'event': {
+        'id': event.id,
+        'date': event.date.toIso8601String(),
+        'type': event.type.name,
+        'title': event.title,
+        'description': event.description,
+        'source': event.imagePath ?? "IA + Revisión",
+        'labs': event.labs, // Labs reales
+      },
+      'medications': medications,
+      'antecedents': antecedents,
+      'historical_data': historicalData,
+    };
+  }
+}
+
+
+
+================================================================================
+FILE: mobile_app/lib/screens/patient_detail_screen.dart
+================================================================================
+import 'package:flutter/material.dart';
+import '../models/patient.dart';
+import '../models/clinical_event.dart';
+import '../models/patient_summary.dart';
+import '../data/repository.dart';
+import '../data/remote_api.dart';
+import 'add_event_screen.dart';
+import 'scores_screen.dart';
+import '../widgets/risk_score_card.dart';
+import '../widgets/lab_trend_chart.dart';
+import '../widgets/timeline_event_card.dart';
+
+import 'package:image_picker/image_picker.dart';
+import 'review_analysis_screen.dart';
+
+class PatientDetailScreen extends StatefulWidget {
+  final Patient? patient;
+  final String? patientId;
+  final String? patientName;
+
+  const PatientDetailScreen({
+    super.key, 
+    this.patient,
+    this.patientId,
+    this.patientName,
+  }) : assert(patient != null || (patientId != null && patientName != null));
+
+  @override
+  State<PatientDetailScreen> createState() => _PatientDetailScreenState();
+}
+
+class _PatientDetailScreenState extends State<PatientDetailScreen> {
+  final Repository _repository = Repository();
+  late Patient _patient;
+  List<ClinicalEvent> _events = [];
+  PatientSummary? _summary;
+  bool _isLoadingSummary = false;
+  bool _isAnalyzing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.patient != null) {
+      _patient = widget.patient!;
+    } else {
+      // Create temp patient for UI until data loads
+      _patient = Patient(
+        id: widget.patientId!,
+        name: widget.patientName!,
+        age: 0, // Placeholder
+        sex: 'M', // Placeholder
+      );
+    }
+    _refreshData();
+  }
+
+  Future<void> _refreshData() async {
+    setState(() {
+      _isLoadingSummary = true;
+    });
+
+    try {
+      // 1. Cargar Summary del backend (fuente de verdad)
+      final summary = await RemoteApi().getPatientSummary(_patient.id);
+      
+      // 2. Actualizar modelo local _patient con datos frescos
+      final updatedPatient = Patient(
+        id: summary.patientId,
+        name: summary.demographics.name,
+        age: summary.demographics.age,
+        sex: summary.demographics.sex,
+        scores: {
+          'CHA2DS2-VASc': summary.riskScores.chads2vasc,
+          'HAS-BLED': summary.riskScores.hasBled,
+          'SCORE2': summary.riskScores.score2,
+        }
+      );
+
+      setState(() {
+        _summary = summary;
+        _patient = updatedPatient;
+        _isLoadingSummary = false;
+      });
+      
+    } catch (e) {
+      print("Error cargando datos: $e");
+      setState(() => _isLoadingSummary = false);
+    }
+  }
+
+  Future<void> _pickImage() async {
+    showModalBottomSheet(
+      context: context,
+      builder: (BuildContext context) {
+        return SafeArea(
+          child: Wrap(
+            children: <Widget>[
+              ListTile(
+                leading: const Icon(Icons.photo_library),
+                title: const Text('Galería'),
+                onTap: () {
+                  Navigator.of(context).pop();
+                  _processImage(ImageSource.gallery);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.camera_alt),
+                title: const Text('Cámara'),
+                onTap: () {
+                  Navigator.of(context).pop();
+                  _processImage(ImageSource.camera);
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildStrategyRow(String label, String value, {bool isBold = false, Color? color}) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: TextStyle(color: Colors.grey[600])),
+          Text(
+            value,
+            style: TextStyle(
+              fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
+              color: color ?? const Color(0xFF1A1C24),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _processImage(ImageSource source) async {
+    final picker = ImagePicker();
+    final pickedFile = await picker.pickImage(source: source);
+
+    if (pickedFile != null) {
+      setState(() => _isAnalyzing = true);
+      
+      try {
+        // 1. Enviar imagen y obtener datos propuestos
+        final extractedData = await RemoteApi().extractData(_patient.id, pickedFile);
+        
+        if (!mounted) return;
+
+        // 2. Mostrar pantalla de confirmación
+        final result = await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => ReviewAnalysisScreen(
+              patientId: _patient.id,
+              extractedData: extractedData,
+            ),
+          ),
+        );
+
+        // 3. Si se confirmó, recargar datos
+        if (result == true) {
+          _refreshData();
+        }
+        
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error analizando imagen: $e')),
+          );
+        }
+      } finally {
+        if (mounted) {
+          setState(() => _isAnalyzing = false);
+        }
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final displayEvents = _summary?.timeline ?? _events;
+    final hasAlerts = _summary?.alerts.isNotEmpty ?? false;
+
+    return Scaffold(
+      backgroundColor: const Color(0xFFF8F9FE), // Fondo gris muy suave
+      appBar: AppBar(
+        elevation: 0,
+        backgroundColor: Colors.white,
+        foregroundColor: Colors.black87,
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              _patient.name,
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
+            ),
+            Text(
+              "${_patient.age} años, ${_patient.sex == 'M' ? 'Masculino' : 'Femenino'}",
+              style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+            ),
+          ],
+        ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.analytics_outlined),
+            tooltip: 'Calculadora Manual',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => ScoresScreen(patient: _patient),
+                ),
+              );
+            },
+          ),
+          IconButton(
+            icon: _isAnalyzing
+                ? const SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.camera_alt_outlined),
+            tooltip: 'Analizar Documento',
+            onPressed: _isAnalyzing ? null : _pickImage,
+          ),
+        ],
+      ),
+      body: RefreshIndicator(
+        onRefresh: _refreshData,
+        child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.only(bottom: 100),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 1. ALERTAS
+              if (hasAlerts)
+                Container(
+                  width: double.infinity,
+                  margin: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFF4F4),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFFFFE0E0)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.warning_amber_rounded,
+                              color: Colors.red[700]),
+                          const SizedBox(width: 8),
+                          Text(
+                            "Atención Requerida",
+                            style: TextStyle(
+                              color: Colors.red[900],
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      ..._summary!.alerts.map((a) => Padding(
+                            padding: const EdgeInsets.only(bottom: 4),
+                            child: Text("• $a",
+                                style: TextStyle(color: Colors.red[800])),
+                          )),
+                    ],
+                  ),
+                ),
+
+              // 2. DASHBOARD DE RIESGO
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      "Perfil de Riesgo",
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF1A1C24),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      clipBehavior: Clip.none,
+                      child: Row(
+                        children: [
+                          if (_summary?.riskScores.chads2vasc != null)
+                            Padding(
+                              padding: const EdgeInsets.only(right: 12),
+                              child: RiskScoreCard(
+                                title: "CHA₂DS₂-VASc",
+                                score: _summary!.riskScores.chads2vasc!.toDouble(),
+                                riskLabel: _summary!.riskScores.details?['CHA2DS2-VASc']?.risk ?? "Pendiente",
+                                color: Colors.blue,
+                              ),
+                            ),
+                          if (_summary?.riskScores.hasBled != null)
+                            Padding(
+                              padding: const EdgeInsets.only(right: 12),
+                              child: RiskScoreCard(
+                                title: "HAS-BLED",
+                                score: _summary!.riskScores.hasBled!.toDouble(),
+                                riskLabel: _summary!.riskScores.details?['HAS-BLED']?.risk ?? "Pendiente",
+                                color: Colors.orange,
+                              ),
+                            ),
+                          if (_summary?.riskScores.score2 != null)
+                            Padding(
+                              padding: const EdgeInsets.only(right: 12),
+                              child: RiskScoreCard(
+                                title: "SCORE2 (10y)",
+                                score: _summary!.riskScores.score2!.toDouble(),
+                                riskLabel: _summary!.riskScores.details?['SCORE2']?.risk ?? "Pendiente",
+                                color: Colors.purple,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 24),
+
+              // 2.5 MANEJO DE LÍPIDOS
+              if (_summary?.riskScores.lipidManagement != null)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        "Manejo de Lípidos (LDL)",
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF1A1C24),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.blue.shade100),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.blue.withOpacity(0.05),
+                              blurRadius: 10,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      "LDL Actual",
+                                      style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                                    ),
+                                    Text(
+                                      "${_summary!.riskScores.lipidManagement!.ldlCurrent!.toInt()} mg/dL",
+                                      style: const TextStyle(
+                                        fontSize: 24,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.blue,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.end,
+                                  children: [
+                                    Text(
+                                      "Meta Objetivo",
+                                      style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                                    ),
+                                    Text(
+                                      "< ${_summary!.riskScores.lipidManagement!.ldlTarget.toInt()} mg/dL",
+                                      style: TextStyle(
+                                        fontSize: 24,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.green[700],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                            const Divider(height: 24),
+                            Text(
+                              "Riesgo: ${_summary!.riskScores.lipidManagement!.riskCategory}",
+                              style: const TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              "Recomendación: ${_summary!.riskScores.lipidManagement!.recommendation}",
+                              style: TextStyle(color: Colors.grey[800]),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+              const SizedBox(height: 24),
+
+              // 2.8 FACTORES DE RIESGO ACTIVOS (NUEVO)
+              if (_summary?.antecedents.isNotEmpty == true)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        "Factores de Riesgo",
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF1A1C24),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: _summary!.antecedents.entries
+                            .where((e) => e.value == true)
+                            .map((e) {
+                          String label = e.key;
+                          // Traducción rápida visual
+                          switch (e.key) {
+                            case 'hta': label = 'Hipertensión'; break;
+                            case 'diabetes': label = 'Diabetes'; break;
+                            case 'smoking': label = 'Tabaquismo'; break;
+                            case 'obesity': label = 'Obesidad'; break;
+                            case 'sedentary': label = 'Sedentarismo'; break;
+                            case 'dyslipidemia': label = 'Dislipidemia'; break;
+                            case 'atrial_fibrillation': label = 'Fibrilación Auricular'; break;
+                            case 'heart_failure': label = 'Insuficiencia Cardíaca'; break;
+                            case 'stroke': label = 'ACV Previo'; break;
+                            case 'acs_history': label = 'Infarto Previo'; break;
+                            case 'vascular_disease': label = 'Enfermedad Vascular'; break;
+                            case 'renal_disease': label = 'Enfermedad Renal'; break;
+                            case 'liver_disease': label = 'Enfermedad Hepática'; break;
+                            case 'bleeding_history': label = 'Historia de Sangrado'; break;
+                            case 'labile_inr': label = 'INR Lábil'; break;
+                            case 'alcohol_drugs': label = 'Alcohol / Drogas'; break;
+                          }
+                          return Chip(
+                            label: Text(label),
+                            backgroundColor: Colors.red.shade50,
+                            labelStyle: TextStyle(color: Colors.red.shade700, fontWeight: FontWeight.bold),
+                            avatar: const Icon(Icons.warning_amber_rounded, size: 16, color: Colors.red),
+                          );
+                        }).toList(),
+                      ),
+                    ],
+                  ),
+                ),
+
+              const SizedBox(height: 24),
+
+              // 2.9 TENDENCIAS DE LABORATORIO (NUEVO)
+              if (_summary?.labTrends.isNotEmpty == true)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        "Tendencias de Laboratorio",
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF1A1C24),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      ..._summary!.labTrends.entries.map((entry) {
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 16.0),
+                          child: LabTrendChart(
+                            title: entry.key.toUpperCase(),
+                            values: entry.value.map((e) => e.value).toList(),
+                            dates: entry.value.map((e) => e.date).toList(),
+                            color: entry.key == 'ldl' ? Colors.orange : Colors.blue,
+                            targetValue: entry.key == 'ldl' 
+                                ? _summary!.riskScores.lipidManagement?.ldlTarget 
+                                : null,
+                            unit: entry.value.isNotEmpty ? entry.value.last.unit : "",
+                          ),
+                        );
+                      }).toList(),
+                    ],
+                  ),
+                ),
+
+              const SizedBox(height: 24),
+
+              // 3. LÍNEA DE TIEMPO CLÍNICA
+
+              const SizedBox(height: 24),
+
+              // 3. MEDICACIONES
+              if (_summary?.medications.isNotEmpty ?? false)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        "Medicaciones Activas",
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF1A1C24),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Container(
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.grey.shade200),
+                        ),
+                        child: Column(
+                          children: _summary!.medications.map((m) {
+                            return ListTile(
+                              leading: Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: Colors.teal.shade50,
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Icon(Icons.medication_outlined,
+                                    color: Colors.teal.shade700, size: 20),
+                              ),
+                              title: Text(m.name,
+                                  style: const TextStyle(fontWeight: FontWeight.w600)),
+                              subtitle: Text(m.dose ?? 'Dosis no especificada'),
+                              trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+                            );
+                          }).toList(),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+              const SizedBox(height: 24),
+
+              // 4. HISTORIA CLÍNICA (TIMELINE)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      "Historia Clínica",
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF1A1C24),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    if (displayEvents.isEmpty)
+                      Container(
+                        padding: const EdgeInsets.all(32),
+                        alignment: Alignment.center,
+                        child: Column(
+                          children: [
+                            Icon(Icons.history_edu,
+                                size: 48, color: Colors.grey[300]),
+                            const SizedBox(height: 16),
+                            Text(
+                              "Aún no hay eventos registrados",
+                              style: TextStyle(color: Colors.grey[500]),
+                            ),
+                          ],
+                        ),
+                      )
+                    else
+                      ListView.builder(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        itemCount: displayEvents.length,
+                        itemBuilder: (context, index) {
+                          return TimelineEventCard(
+                            event: displayEvents[index],
+                            isFirst: index == 0,
+                            isLast: index == displayEvents.length - 1,
+                          );
+                        },
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => AddEventScreen(patientId: _patient.id),
+            ),
+          ).then((_) => _refreshData());
+        },
+        backgroundColor: const Color(0xFF2563EB), // Azul vibrante
+        label: const Text("Nuevo Evento"),
+        icon: const Icon(Icons.add_a_photo_outlined),
+      ),
+    );
+  }
+}
+
+
+
+
+================================================================================
+FILE: mobile_app/lib/screens/review_analysis_screen.dart
+================================================================================
+import 'package:flutter/material.dart';
+import '../models/extraction_models.dart';
+import '../models/clinical_event.dart';
+import '../models/patient_summary.dart'; // For RiskScores if needed visually
+import '../data/remote_api.dart';
+import '../data/repository.dart';
+
+class ReviewAnalysisScreen extends StatefulWidget {
+  final String patientId;
+  final ExtractedData extractedData;
+
+  const ReviewAnalysisScreen({
+    super.key,
+    required this.patientId,
+    required this.extractedData,
+  });
+
+  @override
+  State<ReviewAnalysisScreen> createState() => _ReviewAnalysisScreenState();
+}
+
+class _ReviewAnalysisScreenState extends State<ReviewAnalysisScreen> {
+  late TextEditingController _titleController;
+  late TextEditingController _descriptionController;
+  late DateTime _selectedDate;
+  late EventType _selectedType;
+  late List<String> _medications;
+  late Map<String, bool> _antecedents;
+
+  bool _isSaving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final event = widget.extractedData.event;
+    _titleController = TextEditingController(text: event.title);
+    _descriptionController = TextEditingController(text: event.description);
+    _selectedDate = event.date;
+    _selectedType = event.type;
+    _medications = List.from(widget.extractedData.medications);
+    _antecedents = Map.from(widget.extractedData.antecedents);
+  }
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    _descriptionController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    setState(() => _isSaving = true);
+
+    try {
+      // Reconstruct the event with edited data
+      final updatedEvent = ClinicalEvent(
+        id: widget.extractedData.event.id, // Keep temp ID, backend will fix
+        patientId: widget.patientId,
+        date: _selectedDate,
+        type: _selectedType,
+        title: _titleController.text,
+        description: _descriptionController.text,
+        imagePath: widget.extractedData.event.imagePath,
+        labs: widget.extractedData.event.labs, // NO OLVIDAR ESTO
+      );
+
+      final request = SubmitAnalysisRequest(
+        patientId: widget.patientId,
+        event: updatedEvent,
+        medications: _medications,
+        antecedents: _antecedents,
+        historicalData: widget.extractedData.historicalData, // PASAR DATOS HISTÓRICOS
+      );
+
+      final summary = await RemoteApi().submitAnalysis(request);
+
+      // Update local repo for offline/immediate consistency if needed
+      if (summary.timeline.isNotEmpty) {
+        Repository().addEvent(summary.timeline.first);
+      }
+      
+      // Update local patient scores
+      final patients = Repository().getPatients();
+      final index = patients.indexWhere((p) => p.id == widget.patientId);
+      if (index != -1) {
+         final scoresMap = {
+          'CHA2DS2-VASc': summary.riskScores.chads2vasc,
+          'HAS-BLED': summary.riskScores.hasBled,
+          'SCORE2': summary.riskScores.score2,
+        };
+        Repository().updatePatient(patients[index].copyWithScores(scoresMap));
+      }
+
+      if (!mounted) return;
+      
+      // Pop back to PatientDetailScreen (pop Review, then pop AddEvent)
+      Navigator.pop(context); // Pop Review
+      Navigator.pop(context, true); // Pop AddEvent with success
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Análisis confirmado y guardado")),
+      );
+
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Error al guardar: $e")),
+      );
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text("Revisar Análisis IA"),
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildSectionTitle("Detalles del Evento"),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _titleController,
+              decoration: const InputDecoration(
+                labelText: "Título",
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 16),
+            DropdownButtonFormField<EventType>(
+              value: _selectedType,
+              decoration: const InputDecoration(labelText: "Tipo", border: OutlineInputBorder()),
+              items: EventType.values.map((e) => DropdownMenuItem(value: e, child: Text(e.name.toUpperCase()))).toList(),
+              onChanged: (val) => setState(() => _selectedType = val!),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _descriptionController,
+              maxLines: 3,
+              decoration: const InputDecoration(
+                labelText: "Resumen / Hallazgos",
+                border: OutlineInputBorder(),
+              ),
+            ),
+            
+            const SizedBox(height: 24),
+            _buildSectionTitle("Medicaciones Detectadas"),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              children: _medications.map((med) => Chip(
+                label: Text(med),
+                onDeleted: () => setState(() => _medications.remove(med)),
+                backgroundColor: Colors.blue.shade50,
+                labelStyle: const TextStyle(color: Colors.blue),
+                deleteIconColor: Colors.blue,
+              )).toList(),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: _showAddMedicationDialog,
+              icon: const Icon(Icons.add),
+              label: const Text("Agregar Medicación"),
+            ),
+            
+            const SizedBox(height: 24),
+            _buildSectionTitle("Antecedentes (para Scores)"),
+            const SizedBox(height: 8),
+            Card(
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+                side: BorderSide(color: Colors.grey.shade200),
+              ),
+              child: Column(
+                children: _antecedents.entries.map((entry) {
+                  return CheckboxListTile(
+                    title: Text(_formatAntecedentKey(entry.key)),
+                    value: entry.value,
+                    onChanged: (val) => setState(() => _antecedents[entry.key] = val!),
+                    dense: true,
+                    activeColor: const Color(0xFF2563EB),
+                  );
+                }).toList(),
+              ),
+            ),
+            const SizedBox(height: 80), // Space for FAB
+          ],
+        ),
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _isSaving ? null : _submit,
+        backgroundColor: const Color(0xFF2563EB),
+        icon: _isSaving 
+          ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+          : const Icon(Icons.check),
+        label: Text(_isSaving ? "GUARDANDO..." : "CONFIRMAR Y GUARDAR"),
+      ),
+    );
+  }
+
+  void _showAddMedicationDialog() {
+    final controller = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Agregar Medicación"),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(hintText: "Nombre del medicamento"),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Cancelar"),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              if (controller.text.isNotEmpty) {
+                setState(() {
+                  _medications.add(controller.text);
+                });
+                Navigator.pop(context);
+              }
+            },
+            child: const Text("Agregar"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSectionTitle(String title) {
+    return Text(
+      title,
+      style: const TextStyle(
+        fontSize: 18,
+        fontWeight: FontWeight.bold,
+        color: Color(0xFF1E40AF),
+      ),
+    );
+  }
+
+  String _formatAntecedentKey(String key) {
+    switch (key) {
+      case 'hta': return 'Hipertensión Arterial';
+      case 'diabetes': return 'Diabetes';
+      case 'heart_failure': return 'Insuficiencia Cardíaca';
+      case 'atrial_fibrillation': return 'Fibrilación Auricular';
+      case 'acs_history': return 'SCA / Infarto Previo';
+      case 'stroke': return 'ACV Previo';
+      case 'vascular_disease': return 'Enfermedad Vascular';
+      case 'renal_disease': return 'Enfermedad Renal';
+      case 'liver_disease': return 'Enfermedad Hepática';
+      case 'bleeding_history': return 'Historia de Sangrado';
+      case 'labile_inr': return 'INR Lábil';
+      case 'alcohol_drugs': return 'Alcohol / Drogas';
+      case 'smoking': return 'Tabaquismo';
+      case 'obesity': return 'Obesidad';
+      case 'sedentary': return 'Sedentarismo';
+      case 'dyslipidemia': return 'Dislipidemia';
+      default: return key;
+    }
+  }
+}
+
+
+
+================================================================================
+FILE: mobile_app/lib/data/remote_api.dart
+================================================================================
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import 'package:image_picker/image_picker.dart';
+import '../models/patient_summary.dart';
+import '../models/extraction_models.dart';
+import 'package:flutter/foundation.dart';
+
+import 'dart:io' show Platform;
+
+class RemoteApi {
+  static String get baseUrl {
+    if (kIsWeb) return 'http://127.0.0.1:8000';
+    // IP Local de tu Mac para que el celular se conecte por Wi-Fi
+    return 'http://192.168.1.68:8000';
+  }
+
+  Future<List<PatientSummary>> getPatients() async {
+    final uri = Uri.parse('$baseUrl/patients');
+    final response = await http.get(uri);
+
+    if (response.statusCode == 200) {
+      final List<dynamic> body = jsonDecode(response.body);
+      return body.map((json) => PatientSummary.fromJson(json)).toList();
+    } else {
+      throw Exception('Failed to load patients');
+    }
+  }
+
+  Future<PatientSummary> createPatientAndReturn(String name, int age, String sex) async {
+    final uri = Uri.parse('$baseUrl/patients');
+    final response = await http.post(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'name': name,
+        'age': age,
+        'sex': sex,
+      }),
+    );
+
+    if (response.statusCode == 200) {
+      return PatientSummary.fromJson(jsonDecode(response.body));
+    } else {
+      throw Exception('Failed to create patient: ${response.statusCode}');
+    }
+  }
+
+  Future<void> createPatient(String name, int age, String sex) async {
+    final uri = Uri.parse('$baseUrl/patients');
+    final response = await http.post(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'name': name,
+        'age': age,
+        'sex': sex,
+      }),
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception('Failed to create patient: ${response.statusCode}');
+    }
+  }
+
+  Future<PatientSummary> getPatientSummary(String patientId) async {
+    final uri = Uri.parse('$baseUrl/patients/$patientId/summary');
+    final response = await http.get(uri);
+
+    if (response.statusCode == 200) {
+      return PatientSummary.fromJson(jsonDecode(response.body));
+    } else {
+      throw Exception('Failed to load patient summary: ${response.statusCode}');
+    }
+  }
+
+  Future<ExtractedData> extractData(String patientId, XFile image) async {
+    final uri = Uri.parse('$baseUrl/extract_data');
+    final request = http.MultipartRequest('POST', uri);
+    request.fields['patient_id'] = patientId;
+
+    if (kIsWeb) {
+      final bytes = await image.readAsBytes();
+      request.files.add(
+        http.MultipartFile.fromBytes('file', bytes, filename: image.name),
+      );
+    } else {
+      request.files.add(
+        await http.MultipartFile.fromPath('file', image.path),
+      );
+    }
+
+    final streamedResponse = await request.send();
+    final response = await http.Response.fromStream(streamedResponse);
+
+    if (response.statusCode == 200) {
+      return ExtractedData.fromJson(jsonDecode(response.body));
+    } else {
+      throw Exception('Failed to extract data: ${response.statusCode}');
+    }
+  }
+
+  Future<PatientSummary> submitAnalysis(SubmitAnalysisRequest data) async {
+    final uri = Uri.parse('$baseUrl/submit_analysis');
+    final response = await http.post(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(data.toJson()),
+    );
+
+    if (response.statusCode == 200) {
+      return PatientSummary.fromJson(jsonDecode(response.body));
+    } else {
+      throw Exception('Failed to submit analysis: ${response.statusCode}');
+    }
+  }
+
+  Future<void> deletePatient(String patientId) async {
+    final uri = Uri.parse('$baseUrl/patients/$patientId');
+    final response = await http.delete(uri);
+
+    if (response.statusCode != 200) {
+      throw Exception('Failed to delete patient: ${response.statusCode}');
+    }
+  }
+
+  // Legacy method kept for reference, but should be replaced by the flow above
+  Future<PatientSummary> sendDocumentImage(String patientId, XFile image) async {
+    // ... (Legacy implementation)
+    return extractData(patientId, image).then((extracted) {
+       // This is just a dummy bridge if needed, but we will switch to new flow
+       throw UnimplementedError("Use extractData + submitAnalysis instead");
+    });
+  }
+}
+
+
+
+================================================================================
+FILE: HCE_Vision_Design_Document.md
+================================================================================
+# HCE Vision: Documento de Diseño y Arquitectura Técnica
+
+**Versión:** 1.0  
+**Fecha:** 30 de Noviembre, 2025  
+**Estado:** Propuesta de Diseño para Producción  
+**Enfoque:** Cardiología e Historia Clínica Electrónica (HCE) Automatizada
+
+---
+
+## 1. Descripción del Producto
+
+**HCE Vision** es una aplicación móvil de salud digital diseñada para reconstruir, organizar y analizar la historia clínica de un paciente a partir de fuentes no estructuradas (fotografías de documentos físicos). Utilizando Inteligencia Artificial Multimodal, la aplicación transforma papeles dispersos en una línea de tiempo clínica estructurada, con un fuerte enfoque en la prevención y seguimiento cardiovascular.
+
+### Propuesta de Valor
+*   **Digitalización sin esfuerzo:** El usuario solo toma fotos; la IA hace el resto.
+*   **Ordenamiento Inteligente:** Reconstrucción cronológica automática de eventos pasados.
+*   **Inteligencia Cardiológica:** Cálculo automático de scores de riesgo y detección de alertas.
+*   **Interoperabilidad Semántica:** Estandarización de términos médicos para análisis real.
+
+---
+
+## 2. User Journeys
+
+### 2.1. Journey del Paciente (Usuario Final)
+1.  **Onboarding:** Registro simple (Email/Biometría). Ingreso de datos básicos (Edad, Sexo, Antecedentes conocidos).
+2.  **Captura:** El paciente selecciona "Nuevo Documento". Se abre la cámara con detección de bordes. Toma fotos de un estudio antiguo (ej. Ecocardiograma de 2021).
+3.  **Procesamiento:** La app muestra "Analizando..." y notifica cuando está listo (asíncrono).
+4.  **Validación:** El paciente ve el documento procesado: "Ecocardiograma - 14/05/2021". Puede confirmar o editar la fecha si la IA tiene dudas.
+5.  **Visualización:** El estudio se inserta automáticamente en su **Línea de Tiempo**.
+6.  **Dashboard:** Ve sus gráficos de colesterol actualizados y su riesgo cardiovascular calculado.
+
+### 2.2. Journey del Médico (Usuario Profesional)
+1.  **Acceso:** Login seguro con credenciales profesionales.
+2.  **Búsqueda:** Busca al paciente por DNI o escanea un QR del paciente.
+3.  **Revisión Rápida:** Accede al **Dashboard Médico**. Ve de un vistazo: "Paciente de alto riesgo, Fibrilación Auricular, Anticoagulado".
+4.  **Navegación Temporal:** Scrollea la línea de tiempo para ver la internación del año pasado. Toca el evento para ver la foto original del informe de alta.
+5.  **Toma de Decisión:** Observa la tendencia de la Creatinina antes de recetar un nuevo fármaco.
+6.  **Exportación:** Genera un PDF resumen para adjuntar a la historia clínica institucional.
+
+---
+
+## 3. Arquitectura Técnica
+
+### 3.1. Stack Tecnológico Recomendado
+
+*   **Frontend (Mobile):** **Flutter** (Dart).
+    *   *Por qué:* Rendimiento nativo en iOS/Android, excelente manejo de cámara y gráficos, UI consistente.
+*   **Backend (API):** **Python** con **FastAPI**.
+    *   *Por qué:* Velocidad, tipado estático, ecosistema nativo de IA/Data Science.
+*   **Base de Datos:**
+    *   **Relacional (PostgreSQL):** Para usuarios, estructura de HCE, medicaciones, valores normalizados.
+    *   **Documental (MongoDB o JSONB en Postgres):** Para almacenar el resultado crudo del OCR y estructuras flexibles de diferentes tipos de estudios.
+    *   **Storage (AWS S3 / Google Cloud Storage):** Almacenamiento seguro de las imágenes encriptadas.
+*   **Inteligencia Artificial (El Núcleo):**
+    *   **OCR/Multimodal:** Google Cloud Vision API o AWS Textract (para extracción de texto base) + **LLM (GPT-4o o Gemini 1.5 Pro)** para interpretación semántica y estructuración JSON.
+    *   **NLP Médico:** Named Entity Recognition (NER) para detectar dosis, fármacos y diagnósticos.
+
+### 3.2. Diagrama de Arquitectura de Datos (Pipeline)
+
+```mermaid
+graph TD
+    A[App Mobile] -->|Sube Foto| B(API Gateway / Load Balancer)
+    B -->|Encola Tarea| C{Cola de Mensajes (Redis/RabbitMQ)}
+    C -->|Procesa| D[Worker de IA]
+    
+    subgraph "Motor de IA"
+    D -->|1. OCR & Layout| E[Extractor de Texto]
+    E -->|Texto Crudo| F[LLM Médico]
+    F -->|Prompt: Estructurar & Clasificar| G[JSON Estructurado]
+    end
+    
+    G -->|Datos| H[Normalizador (CIE-10, SNOMED)]
+    H -->|Guarda| I[(Base de Datos)]
+    I -->|Actualiza| J[Motor de Scores]
+    J -->|Notifica| A
+```
+
+---
+
+## 4. Pantallas Detalladas y Componentes
+
+### 4.1. Pantalla de Inicio (Timeline)
+*   **Header:** Saludo, Foto de perfil, Alerta de "Próxima medicación".
+*   **Componente Central: Línea de Tiempo Vertical.**
+    *   *Nodo:* Círculo con icono según tipo (Píldora, Corazón, Documento, Hospital).
+    *   *Tarjeta:* Fecha a la izquierda, Título a la derecha (ej. "Consulta Cardiología"), Subtítulo (ej. "Dr. Pérez - H. Italiano").
+    *   *Estado:* Indicador de color (Verde: Normal, Rojo: Alerta/Fuera de rango).
+*   **FAB (Floating Action Button):** Botón grande "+" para escanear.
+
+### 4.2. Detalle de Documento
+*   **Pestañas:** "Resumen" | "Original".
+*   **Resumen:** Lista de datos clave extraídos (Diagnósticos, Medicación recetada, Valores de Lab).
+*   **Original:** Visor de imagen con zoom y pan. Overlay opcional resaltando dónde se encontró el dato.
+
+### 4.3. Dashboard Cardiológico
+*   **Tarjetas de Scores:**
+    *   CHA₂DS₂-VASc: [ 3 | Alto Riesgo ] (Gráfico de velocímetro).
+    *   HAS-BLED: [ 1 | Bajo Riesgo ].
+*   **Gráficos de Tendencia:**
+    *   Presión Arterial (Sistólica/Diastólica) en el tiempo.
+    *   LDL Colesterol (con línea de meta terapéutica).
+*   **Medicación Actual:** Lista compacta con dosis y frecuencia.
+
+---
+
+## 5. Flujos Funcionales
+
+### Flujo de "Ingesta Inteligente"
+1.  **Upload:** Usuario sube foto de un laboratorio.
+2.  **Pre-procesamiento:** Backend mejora contraste y endereza la imagen.
+3.  **Clasificación:** El modelo determina: `Tipo: Laboratorio`.
+4.  **Extracción:**
+    *   Detecta fecha: "12/05/2023".
+    *   Detecta tabla de valores.
+    *   Itera filas: "Glucemia" -> 98 mg/dL.
+5.  **Normalización:**
+    *   "Glucemia" -> `LOINC 2345-7`.
+    *   98 -> `Value: 98`, `Unit: mg/dL`.
+6.  **Evaluación:** Compara con rangos de referencia. Marca `flag: normal`.
+7.  **Persistencia:** Guarda en DB vinculado al paciente.
+8.  **Feedback:** Usuario recibe notificación "Laboratorio procesado exitosamente".
+
+---
+
+## 6. Lógica de Scores Clínicos
+
+El sistema recalculará estos scores cada vez que se ingrese nueva información relevante (edad, nuevos diagnósticos, nuevos valores).
+
+### 6.1. CHA₂DS₂-VASc (Riesgo de ACV en FA)
+*   **Inputs:**
+    *   Insuficiencia Cardíaca (Detectado en antecedentes o Eco con FEy < 40%): +1
+    *   Hipertensión (Antecedente o medicación antihipertensiva): +1
+    *   Edad >= 75: +2
+    *   Diabetes: +1
+    *   ACV/AIT previo: +2
+    *   Enfermedad Vascular (IAM, EAP): +1
+    *   Edad 65-74: +1
+    *   Sexo Femenino: +1
+*   **Output:** Sumatoria total.
+*   **Interpretación:** 0 (Bajo), 1 (Moderado), >=2 (Alto -> Indicar Anticoagulación).
+
+### 6.2. Riesgo Cardiovascular (SCORE2 / ASCVD)
+*   **Inputs:** Edad, Sexo, Tabaquismo (Sí/No), Presión Sistólica (último valor), Colesterol Total, HDL, LDL.
+*   **Lógica:** Aplicar algoritmo de ecuaciones de cohorte (Pooled Cohort Equations).
+*   **Output:** % de riesgo a 10 años de evento mayor.
+
+---
+
+## 7. Estructura del Informe Reconstruido (JSON Schema)
+
+```json
+{
+  "patient_id": "uuid",
+  "last_updated": "2025-11-30T10:00:00Z",
+  "clinical_summary": {
+    "allergies": ["Penicilina"],
+    "chronic_conditions": [
+      {"code": "I10", "name": "Hipertensión esencial", "since": "2018"}
+    ],
+    "active_medications": [
+      {"drug": "Atorvastatina", "dose": "20mg", "freq": "24h", "start_date": "2020-01-01"}
+    ]
+  },
+  "timeline": [
+    {
+      "date": "2024-03-15",
+      "type": "LABORATORY",
+      "title": "Laboratorio de Rutina",
+      "institution": "Laboratorio Central",
+      "data": {
+        "cholesterol_total": 190,
+        "hdl": 45,
+        "ldl": 110
+      },
+      "original_file_url": "s3://..."
+    },
+    {
+      "date": "2023-11-10",
+      "type": "IMAGING",
+      "title": "Ecocardiograma Doppler",
+      "findings": "Función sistólica conservada. HVI leve.",
+      "lvef": 60
+    }
+  ]
+}
+```
+
+---
+
+## 8. Propuesta de Diseño (UI/UX)
+
+*   **Paleta de Colores:**
+    *   Primario: `Deep Blue (#0A2463)` - Transmite confianza y profesionalismo médico.
+    *   Secundario: `Teal (#3E92CC)` - Para acciones principales y acentos.
+    *   Alerta: `Coral Red (#FF6B6B)` - Para valores fuera de rango o riesgos altos.
+    *   Fondo: `Off-White (#F9FAFB)` - Para reducir fatiga visual.
+*   **Tipografía:** **Inter** o **Roboto**. Limpia, sans-serif, excelente legibilidad en tamaños pequeños.
+*   **Estilo:** "Clean Medical". Tarjetas con sombras suaves (elevation), bordes redondeados (8px). Mucho espacio en blanco (whitespace) para no abrumar con datos.
+
+---
+
+## 9. Roadmap de Desarrollo
+
+### Fase 1: MVP (Mes 1-2)
+*   Autenticación de usuarios.
+*   Cámara y subida de imágenes.
+*   OCR básico + LLM para extraer Fecha, Tipo de Documento y Resumen de texto libre.
+*   Visualización en Timeline simple.
+
+### Fase 2: Cardiología Profunda (Mes 3-4)
+*   Extracción estructurada de tablas de laboratorio.
+*   Detección específica de parámetros cardíacos (FEy, diámetros, espesores).
+*   Implementación del motor de Scores (CHA2DS2-VASc, etc.).
+*   Gráficos de evolución.
+
+### Fase 3: Ecosistema y Beta (Mes 5-6)
+*   Exportación a PDF profesional.
+*   Módulo de médicos (Dashboard de profesional).
+*   Integración con wearables (Apple Health / Google Fit) para traer frecuencia cardíaca.
+
+---
+
+## 10. Ideas para Escalabilidad Futura
+*   **Chat con tu Historia:** Un chatbot RAG (Retrieval-Augmented Generation) donde el paciente pregunte "¿Cuándo fue mi último electro?" y la app responda con el dato exacto.
+*   **Alertas Preventivas:** "Hace 1 año no te haces un control de lípidos, te sugerimos agendar uno".
+*   **Interconsulta:** Compartir un link temporal seguro con otro médico para segunda opinión.
+
+
+
