@@ -103,7 +103,7 @@ def analyze_image_with_gemini(image_bytes: bytes) -> dict:
         except Exception as e:
             print(f"Error listando modelos: {e}")
 
-        # Usar el nombre EXACTO que vimos en los logs del usuario
+        # Usar el nombre EXACTO que vimos en los logs (SIN el 1.5)
         model_name = 'models/gemini-flash-latest'
         try:
             model = genai.GenerativeModel(model_name)
