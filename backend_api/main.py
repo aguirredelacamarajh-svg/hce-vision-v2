@@ -96,8 +96,20 @@ def analyze_image_with_gemini(image_bytes: bytes) -> dict:
         return fake_llm_extract("simulated")
 
     try:
-        # Usamos 'gemini-1.5-flash-001' nombre técnico exacto
-        model = genai.GenerativeModel('gemini-1.5-flash-001')
+        # DEBUG: Listar modelos disponibles para ver cuál funciona
+        try:
+            for m in genai.list_models():
+                print(f"Modelo disponible: {m.name}")
+        except Exception as e:
+            print(f"Error listando modelos: {e}")
+
+        # Intentamos usar 'gemini-1.5-flash' primero, si falla, 'gemini-pro'
+        model_name = 'gemini-1.5-flash'
+        try:
+            model = genai.GenerativeModel(model_name)
+        except:
+            print(f"⚠️ {model_name} no encontrado, usando 'gemini-pro'")
+            model = genai.GenerativeModel('gemini-pro')
         
         prompt = """
         Analiza este documento médico (imagen). Extrae la información clínica relevante y devuélvela EXCLUSIVAMENTE en formato JSON válido con la siguiente estructura exacta.
