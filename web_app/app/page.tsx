@@ -21,9 +21,12 @@ export default function Home() {
           <a className="hover:text-sky-700" href="#cta">
             Comenzar
           </a>
-          <button className="rounded-xl bg-sky-600 px-4 py-2 text-white shadow-md shadow-sky-200 transition hover:bg-sky-700">
+          <a
+            href="/login"
+            className="rounded-xl bg-sky-600 px-4 py-2 text-white shadow-md shadow-sky-200 transition hover:bg-sky-700"
+          >
             Iniciar sesión
-          </button>
+          </a>
         </div>
       </header>
 
