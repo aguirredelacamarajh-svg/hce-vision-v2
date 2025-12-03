@@ -114,78 +114,125 @@ def analyze_images_with_gemini(images_bytes: List[bytes]) -> dict:
         model = genai.GenerativeModel(model_name)
         
         prompt = """
-        Actúa como un Cardiólogo experto y un Internista meticuloso. Analiza este conjunto de documentos médicos (pueden ser múltiples páginas de una misma historia o varios estudios).
-        
-        Tu objetivo es construir dos líneas de información paralelas:
-        1. **Perfil Cardiológico (Prioridad Alta):** Datos críticos para cálculo de riesgo (CHA2DS2-VASc, SCORE2, Lípidos).
-        2. **Historia Clínica Global (Contexto):** Cualquier otro evento médico relevante NO cardiológico (cirugías, traumas, infecciones, otras patologías crónicas) para tener una visión holística del paciente.
+        Eres un modelo clínico experto en cardiología e internista. Debes analizar un DOCUMENTO MÉDICO que puede ser:
+        - Laboratorio (tablas, valores numéricos)
+        - Ecocardiograma / Imagen cardiovascular
+        - Resumen de internación (Epicrisis)
+        - Electrocardiograma
+        - Notas médicas, medicación
+        - Informes de urgencias o consultas
+        - Cualquier documento libre con datos clínicos
 
-        Extrae la información y devuélvela EXCLUSIVAMENTE en formato JSON válido con la siguiente estructura:
-        
+        OBJETIVO:
+        Extraer y estructurar TODA la información relevante con la MÁXIMA sensibilidad y especificidad, para permitir al backend calcular scores cardiológicos, generar tendencias y construir una historia clínica global.
+
+        TU RESPUESTA DEBE SER *EXCLUSIVAMENTE* un JSON VÁLIDO siguiendo esta estructura EXACTA:
+
         {
-            "date": "YYYY-MM-DD", // Fecha del documento principal o la más reciente encontrada.
+            "date": "YYYY-MM-DD",
             "type": "laboratorio" | "imagen" | "medicacion" | "epicrisis" | "procedimiento" | "consulta" | "otro",
-            "title": "Título descriptivo del conjunto de documentos",
-            "description": "Resumen conciso de los hallazgos principales (Cardio + Global).",
-            
+
+            "title": "Texto breve",
+            "description": "Resumen clínico conciso",
+
             "antecedents": {
-                // CARDIOVASCULARES
                 "hta": boolean,
                 "diabetes": boolean,
-                "heart_failure": boolean, 
-                "atrial_fibrillation": boolean, 
-                "acs_history": boolean, 
-                "stroke": boolean, 
+                "heart_failure": boolean,
+                "atrial_fibrillation": boolean,
+                "acs_history": boolean,
+                "stroke": boolean,
                 "vascular_disease": boolean,
-                "dyslipidemia": boolean,
-                
-                // RIESGO SANGRADO / OTROS
                 "renal_disease": boolean,
                 "liver_disease": boolean,
                 "bleeding_history": boolean,
                 "labile_inr": boolean,
                 "alcohol_drugs": boolean,
-                "smoking": boolean, 
+                "smoking": boolean,
                 "obesity": boolean,
-                "sedentary": boolean
+                "sedentary": boolean,
+                "dyslipidemia": boolean
             },
-            
+
             "labs": {
-                // Valores numéricos clave para cardio
-                "ldl": { "value": number, "unit": "string" } | null, 
-                "hdl": { "value": number, "unit": "string" } | null,
-                "total_cholesterol": { "value": number, "unit": "string" } | null,
-                "triglycerides": { "value": number, "unit": "string" } | null,
-                "creatinine": { "value": number, "unit": "string" } | null,
-                "bnp": { "value": number, "unit": "string" } | null, 
-                "hemoglobin": { "value": number, "unit": "string" } | null,
-                "hba1c": { "value": number, "unit": "string" } | null,
-                "potassium": { "value": number, "unit": "string" } | null
+                "ldl": { "value": number, "unit": "mg/dL" } | null,
+                "hdl": { "value": number, "unit": "mg/dL" } | null,
+                "total_cholesterol": { "value": number, "unit": "mg/dL" } | null,
+                "triglycerides": { "value": number, "unit": "mg/dL" } | null,
+                "creatinine": { "value": number, "unit": "mg/dL" } | null,
+                "bnp": { "value": number, "unit": "pg/mL" } | null,
+                "ntprobnp": { "value": number, "unit": "pg/mL" } | null,
+                "hemoglobin": { "value": number, "unit": "g/dL" } | null,
+                "hba1c": { "value": number, "unit": "%" } | null,
+                "glucose": { "value": number, "unit": "mg/dL" } | null,
+                "potassium": { "value": number, "unit": "mEq/L" } | null,
+                "sodium": { "value": number, "unit": "mEq/L" } | null
             },
-            
-            "medications": ["Nombre Medicamento 1", "Nombre Medicamento 2"],
-            
-            "global_timeline_events": [
-                // AQUÍ VA LA HISTORIA GLOBAL (NO CARDIOLÓGICA O EVENTOS PASADOS)
-                // Extrae cirugías previas, diagnósticos de otras especialidades, internaciones antiguas, etc.
+
+            "cardio_parameters": {
+                "lvef": number | null,
+                "lv_mass": number | null,
+                "ivsd": number | null,
+                "pw_thickness": number | null,
+                "tapse": number | null,
+                "rv_function": "normal" | "disminuida" | null,
+                "aortic_valve_area": number | null,
+                "mean_gradient_av": number | null,
+                "pulmonary_pressure": number | null
+            },
+
+            "historical_data": [
                 {
-                    "date": "YYYY-MM-DD", // Aproximada si no es exacta
-                    "category": "cirugia" | "trauma" | "infeccion" | "oncologia" | "otro",
-                    "description": "Descripción breve del evento (ej. Apendicectomía, Neumonía, Fractura de fémur)"
+                    "date": "YYYY-MM-DD",
+                    "labs": {
+                        "ldl": { "value": number, "unit": "mg/dL" },
+                        "hdl": { "value": number, "unit": "mg/dL" },
+                        "glucose": { "value": number, "unit": "mg/dL" },
+                        "creatinine": { "value": number, "unit": "mg/dL" }
+                    }
                 }
             ],
 
-            "historical_data": [
-                // Tablas de laboratorios antiguos encontrados en el texto para gráficas
+            "medications": [
+                "Nombre medicamento",
+                "Otro medicamento"
+            ],
+            
+            "global_timeline_events": [
+                // Historia Global (NO Cardiológica)
                 {
                     "date": "YYYY-MM-DD", 
-                    "labs": { 
-                        "ldl": { "value": number, "unit": "string" },
-                        "creatinine": { "value": number, "unit": "string" }
-                    }
+                    "category": "cirugia" | "trauma" | "infeccion" | "oncologia" | "otro",
+                    "description": "Descripción breve del evento (ej. Apendicectomía, Neumonía)"
                 }
-            ]
+            ],
+
+            "scores_detected": {
+                "grace": number | null,
+                "crusade": number | null,
+                "killip": number | null,
+                "timirisk": number | null,
+                "syntax": number | null,
+                "cha2ds2vasc": number | null,
+                "hasbled": number | null,
+                "score2": number | null,
+                "framingham": number | null,
+                "ascvd": number | null
+            }
         }
+
+        REGLAS DE ORO:
+        1. Si el documento tiene TABLAS, debes leerlas aunque estén torcidas, incompletas o borrosas.
+        2. Si aparecen valores en texto libre (ej: “LDL 178 mg/dL”), EXTRÁELOS igual.
+        3. Si no estás seguro, NO inventes: usar null.
+        4. Detecta antecedentes aunque estén implícitos (“paciente hipertenso”, “DM2 de años”).
+        5. Detecta diagnósticos cardiológicos clave: IAM, FA, IC, ACV, dislipidemia.
+        6. Si hay múltiples fechas, intenta elegir la del estudio. Si no existe, usa la fecha de hoy.
+        7. Extrae medicaciones en texto libre y recetas.
+        8. Detecta signos ecocardiográficos, incl. LVEF, diámetros, gradientes, HVI.
+        9. Detecta campos relevantes para CÁLCULO DE SCORES aunque no se pidan explícitamente.
+        10. Extrae eventos NO cardiológicos importantes (cirugías, traumas) en 'global_timeline_events'.
+        11. SOLO devuelve el JSON, sin explicaciones.
         """
 
         # Construir el payload con Prompt + Todas las imágenes
