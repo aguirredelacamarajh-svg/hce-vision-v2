@@ -282,8 +282,8 @@ export default function PatientDetailPage() {
               key={tab.key}
               onClick={() => setActiveTab(tab.key as Tab)}
               className={`flex-1 rounded-xl px-4 py-3 text-sm font-semibold transition ${activeTab === tab.key
-                  ? "bg-white text-sky-700 shadow-sm ring-1 ring-sky-100"
-                  : "text-slate-600 hover:text-sky-700"
+                ? "bg-white text-sky-700 shadow-sm ring-1 ring-sky-100"
+                : "text-slate-600 hover:text-sky-700"
                 }`}
             >
               {tab.label}
@@ -468,30 +468,44 @@ export default function PatientDetailPage() {
               <label className="block cursor-pointer rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 p-4 text-center text-sm font-semibold text-slate-700 hover:border-sky-200 hover:bg-sky-50">
                 <input
                   type="file"
-                  accept="image/*"
+                  accept="image/*,.pdf"
                   multiple
                   className="hidden"
                   onChange={(e) => handleFiles(e.target.files)}
                 />
-                Selecciona imágenes o arrastra aquí (máx 8)
+                Selecciona imágenes o PDFs o arrastra aquí (máx 8)
               </label>
 
               {previews.length > 0 && (
                 <div className="grid grid-cols-3 gap-3 md:grid-cols-4">
-                  {previews.map((src, idx) => (
-                    <div
-                      key={src}
-                      className="group relative overflow-hidden rounded-xl border border-slate-100 bg-slate-50"
-                    >
-                      <img src={src} alt={`preview-${idx}`} className="h-28 w-full object-cover" />
-                      <button
-                        onClick={() => removeFile(idx)}
-                        className="absolute right-2 top-2 rounded-full bg-white/90 px-2 py-1 text-xs font-semibold text-red-600 shadow"
+                  {previews.map((src, idx) => {
+                    const file = files[idx];
+                    const isPdf = file?.type === "application/pdf";
+
+                    return (
+                      <div
+                        key={src}
+                        className="group relative overflow-hidden rounded-xl border border-slate-100 bg-slate-50"
                       >
-                        Quitar
-                      </button>
-                    </div>
-                  ))}
+                        {isPdf ? (
+                          <div className="flex h-28 w-full items-center justify-center bg-red-50 text-red-500">
+                            <div className="text-center">
+                              <span className="text-2xl">📄</span>
+                              <p className="mt-1 text-[10px] font-bold uppercase">PDF</p>
+                            </div>
+                          </div>
+                        ) : (
+                          <img src={src} alt={`preview-${idx}`} className="h-28 w-full object-cover" />
+                        )}
+                        <button
+                          onClick={() => removeFile(idx)}
+                          className="absolute right-2 top-2 rounded-full bg-white/90 px-2 py-1 text-xs font-semibold text-red-600 shadow"
+                        >
+                          Quitar
+                        </button>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
 

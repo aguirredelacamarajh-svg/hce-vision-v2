@@ -30,6 +30,21 @@ export type GlobalEvent = {
   description: string;
 };
 
+export type LabResult = {
+  date: string;
+  value: number;
+  unit: string;
+};
+
+export type BloodPressureRecord = {
+  date: string;
+  time: string;
+  systolic: number;
+  diastolic: number;
+  heart_rate?: number;
+  notes?: string;
+};
+
 export type PatientDetail = {
   patient_id: string;
   demographics: PatientDemographics;
@@ -38,6 +53,8 @@ export type PatientDetail = {
   timeline?: ClinicalEvent[];
   risk_scores?: RiskScores;
   global_timeline_events?: GlobalEvent[];
+  lab_trends?: Record<string, LabResult[]>;
+  blood_pressure_history?: BloodPressureRecord[];
 };
 
 export type ExtractedData = {
