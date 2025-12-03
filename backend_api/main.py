@@ -117,12 +117,6 @@ async def global_exception_handler(request: Request, exc: Exception):
         content={"detail": "Internal Server Error", "message": str(exc)},
     )
 
-<<<<<<< HEAD
-# --- Configuración Gemini ---
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
-=======
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
     logger.warning(f"⚠️ HTTP Exception: {exc.detail} (Status: {exc.status_code})")
@@ -130,6 +124,11 @@ async def http_exception_handler(request: Request, exc: HTTPException):
         status_code=exc.status_code,
         content={"detail": exc.detail},
     )
+
+# --- Configuración Gemini ---
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
 
 # --- Inicialización ---
 @app.on_event("startup")
@@ -143,7 +142,6 @@ def on_startup():
         logger.info("✅ Gemini API Key configurada.")
     else:
         logger.warning("⚠️ GEMINI_API_KEY no encontrada. La IA funcionará en modo simulado.")
->>>>>>> main
 
 # --- Lógica de Negocio ---
 
@@ -160,10 +158,10 @@ def fake_llm_extract(text: str) -> dict:
         "global_timeline_events": []
     }
 
-def analyze_images_with_gemini(images_bytes: List[bytes]) -> dict:
+def analyze_images_with_gemini(files_data: List[tuple[bytes, str]]) -> dict:
     """
-    Envía MÚLTIPLES imágenes a Gemini 1.5 Flash para extracción estructurada.
-    Separa datos Cardiológicos vs. Historia Global.
+    Envía MÚLTIPLES documentos (imágenes o PDFs) a Gemini 1.5 Flash para extracción estructurada.
+    files_data: Lista de tuplas (contenido_bytes, mime_type)
     """
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
@@ -171,12 +169,12 @@ def analyze_images_with_gemini(images_bytes: List[bytes]) -> dict:
 
     try:
         model_name = 'models/gemini-flash-latest'
-        logger.info(f"🧠 Enviando {len(images_bytes)} imágenes a Gemini ({model_name})...")
+        logger.info(f"🧠 Enviando {len(files_data)} documentos a Gemini ({model_name})...")
         
         model = genai.GenerativeModel(model_name)
         
         prompt = """
-        Eres un modelo clínico experto en cardiología e internista. Debes analizar un DOCUMENTO MÉDICO que puede ser:
+        Eres un modelo clínico experto en cardiología e internista. Debes analizar uno o más DOCUMENTOS MÉDICOS (imágenes o PDFs) que pueden ser:
         - Laboratorio (tablas, valores numéricos)
         - Ecocardiograma / Imagen cardiovascular
         - Resumen de internación (Epicrisis)
@@ -191,11 +189,11 @@ def analyze_images_with_gemini(images_bytes: List[bytes]) -> dict:
         TU RESPUESTA DEBE SER *EXCLUSIVAMENTE* un JSON VÁLIDO siguiendo esta estructura EXACTA:
 
         {
-            "date": "YYYY-MM-DD",
+            "date": "YYYY-MM-DD", // Fecha del documento más relevante. Si no hay, usa la fecha de hoy.
             "type": "laboratorio" | "imagen" | "medicacion" | "epicrisis" | "procedimiento" | "consulta" | "otro",
 
-            "title": "Texto breve",
-            "description": "Resumen clínico conciso",
+            "title": "Texto breve descriptivo",
+            "description": "Resumen clínico conciso de los hallazgos.",
 
             "antecedents": {
                 "hta": boolean,
@@ -261,11 +259,10 @@ def analyze_images_with_gemini(images_bytes: List[bytes]) -> dict:
             ],
             
             "global_timeline_events": [
-                // Historia Global (NO Cardiológica)
                 {
                     "date": "YYYY-MM-DD", 
                     "category": "cirugia" | "trauma" | "infeccion" | "oncologia" | "otro",
-                    "description": "Descripción breve del evento (ej. Apendicectomía, Neumonía)"
+                    "description": "Descripción breve del evento"
                 }
             ],
 
@@ -287,20 +284,19 @@ def analyze_images_with_gemini(images_bytes: List[bytes]) -> dict:
         1. Si el documento tiene TABLAS, debes leerlas aunque estén torcidas, incompletas o borrosas.
         2. Si aparecen valores en texto libre (ej: “LDL 178 mg/dL”), EXTRÁELOS igual.
         3. Si no estás seguro, NO inventes: usar null.
-        4. Detecta antecedentes aunque estén implícitos (“paciente hipertenso”, “DM2 de años”).
-        5. Detecta diagnósticos cardiológicos clave: IAM, FA, IC, ACV, dislipidemia.
-        6. Si hay múltiples fechas, intenta elegir la del estudio. Si no existe, usa la fecha de hoy.
+        4. Detecta antecedentes aunque estén implícitos.
+        5. Detecta diagnósticos cardiológicos clave.
+        6. Si hay múltiples fechas, intenta elegir la del estudio más reciente.
         7. Extrae medicaciones en texto libre y recetas.
-        8. Detecta signos ecocardiográficos, incl. LVEF, diámetros, gradientes, HVI.
-        9. Detecta campos relevantes para CÁLCULO DE SCORES aunque no se pidan explícitamente.
-        10. Extrae eventos NO cardiológicos importantes (cirugías, traumas) en 'global_timeline_events'.
-        11. SOLO devuelve el JSON, sin explicaciones.
+        8. Detecta signos ecocardiográficos.
+        9. Extrae eventos NO cardiológicos importantes en 'global_timeline_events'.
+        10. SOLO devuelve el JSON.
         """
 
-        # Construir el payload con Prompt + Todas las imágenes
+        # Construir el payload con Prompt + Todos los archivos (con su mime type)
         content_parts = [prompt]
-        for img_bytes in images_bytes:
-            content_parts.append({'mime_type': 'image/jpeg', 'data': img_bytes})
+        for content, mime in files_data:
+            content_parts.append({'mime_type': mime, 'data': content})
 
         response = model.generate_content(content_parts)
         
@@ -509,7 +505,7 @@ async def extract_data(
     db: Session = Depends(get_db)
 ):
     """
-    Paso 1: Analiza MÚLTIPLES imágenes y devuelve los datos PROPUESTOS.
+    Paso 1: Analiza MÚLTIPLES documentos (imágenes/PDFs) y devuelve los datos PROPUESTOS.
     """
     logger.info(f"📤 Recibida solicitud de análisis. Paciente: {patient_id}, Archivos: {len(files)}")
     
@@ -519,14 +515,14 @@ async def extract_data(
         raise HTTPException(status_code=404, detail="Paciente no encontrado")
     summary = PatientSummary(**summary_data)
 
-    # Leer todas las imágenes
-    images_content = []
+    # Leer todos los archivos y sus tipos MIME
+    files_data = []
     for file in files:
         content = await file.read()
-        images_content.append(content)
+        files_data.append((content, file.content_type))
 
-    # Analizar con IA (Multi-imagen)
-    raw_data = analyze_images_with_gemini(images_content)
+    # Analizar con IA (Multi-archivo)
+    raw_data = analyze_images_with_gemini(files_data)
     
     # Crear evento temporal principal (Cardio)
     temp_event = ClinicalEvent(
