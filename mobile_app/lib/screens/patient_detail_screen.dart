@@ -33,6 +33,40 @@ class PatientDetailScreen extends StatefulWidget {
 
 
 
+class _SkeletonDetail extends StatelessWidget {
+  const _SkeletonDetail();
+
+  Widget _box({double height = 90, double radius = 12}) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      height: height,
+      decoration: BoxDecoration(
+        color: Colors.grey.shade200,
+        borderRadius: BorderRadius.circular(radius),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SizedBox(height: 16),
+          _box(height: 80),
+          _box(height: 140),
+          _box(height: 180),
+          _box(height: 120),
+          _box(height: 240),
+          const SizedBox(height: 40),
+        ],
+      ),
+    );
+  }
+}
+
 class _PatientDetailScreenState extends State<PatientDetailScreen> {
   final Repository _repository = Repository();
   late Patient _patient;
@@ -197,8 +231,15 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
 
     // 1. Estado de Carga Inicial (Pantalla completa)
     if (_isLoadingSummary && _summary == null) {
-      return const Scaffold(
-        body: HceLoading(fullscreen: true, message: "Cargando historia clínica..."),
+      return Scaffold(
+        backgroundColor: const Color(0xFFF8F9FE),
+        appBar: AppBar(
+          elevation: 0,
+          backgroundColor: Colors.white,
+          foregroundColor: Colors.black87,
+          title: Text(_patient.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+        ),
+        body: const _SkeletonDetail(),
       );
     }
 
