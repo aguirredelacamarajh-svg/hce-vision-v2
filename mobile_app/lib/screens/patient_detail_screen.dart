@@ -67,6 +67,151 @@ class _SkeletonDetail extends StatelessWidget {
   }
 }
 
+class _RiskBar extends StatelessWidget {
+  final String label;
+  final double? value;
+  final double max;
+  final Color color;
+
+  const _RiskBar({
+    required this.label,
+    required this.value,
+    required this.color,
+    this.max = 10,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final normalized = value != null ? (value! / max).clamp(0.0, 1.0) : 0.0;
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                ),
+                const SizedBox(height: 6),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: LinearProgressIndicator(
+                    value: value == null ? 0.0 : normalized,
+                    backgroundColor: color.withOpacity(0.12),
+                    color: color,
+                    minHeight: 8,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          Text(
+            value?.toStringAsFixed(1) ?? "--",
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TimelineTile extends StatelessWidget {
+  final ClinicalEvent event;
+  final bool isFirst;
+  final bool isLast;
+
+  const _TimelineTile({
+    required this.event,
+    required this.isFirst,
+    required this.isLast,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Column(
+          children: [
+            Container(
+              width: 14,
+              height: 14,
+              decoration: BoxDecoration(
+                color: Colors.blue,
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white, width: 2),
+              ),
+            ),
+            if (!isLast)
+              Container(
+                width: 2,
+                height: 60,
+                color: Colors.blue.withOpacity(0.3),
+              ),
+          ],
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Container(
+            margin: const EdgeInsets.only(bottom: 16),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.grey.shade200),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.02),
+                  blurRadius: 6,
+                  offset: const Offset(0, 3),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      event.title,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    Text(
+                      event.date.toIso8601String().split('T').first,
+                      style: const TextStyle(color: Colors.grey, fontSize: 12),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  "Tipo: ${event.type.name}",
+                  style: const TextStyle(fontSize: 12, color: Colors.black54),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  event.description,
+                  style: const TextStyle(fontSize: 14, color: Colors.black87),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _PatientDetailScreenState extends State<PatientDetailScreen> {
   final Repository _repository = Repository();
   late Patient _patient;
@@ -364,17 +509,17 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
                     padding: const EdgeInsets.symmetric(horizontal: 16.0),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          "Perfil de Riesgo",
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFF1A1C24),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        SingleChildScrollView(
+                  children: [
+                    const Text(
+                      "Perfil de Riesgo",
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF1A1C24),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    SingleChildScrollView(
                           scrollDirection: Axis.horizontal,
                           clipBehavior: Clip.none,
                           child: Row(
@@ -407,14 +552,46 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
                                     score: _summary!.riskScores.score2!.toDouble(),
                                     riskLabel: _summary!.riskScores.details?['SCORE2']?.risk ?? "Pendiente",
                                     color: Colors.purple,
-                                  ),
-                                ),
-                            ],
-                          ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    const Text(
+                      "Detalle de riesgo",
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF1A1C24),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Column(
+                      children: [
+                        _RiskBar(
+                          label: "CHA₂DS₂-VASc",
+                          value: _summary?.riskScores.chads2vasc?.toDouble(),
+                          color: Colors.blue,
+                          max: 9,
+                        ),
+                        _RiskBar(
+                          label: "HAS-BLED",
+                          value: _summary?.riskScores.hasBled?.toDouble(),
+                          color: Colors.orange,
+                          max: 9,
+                        ),
+                        _RiskBar(
+                          label: "SCORE2",
+                          value: _summary?.riskScores.score2?.toDouble(),
+                          color: Colors.purple,
+                          max: 10,
                         ),
                       ],
                     ),
-                  ),
+                  ],
+                ),
+              ),
 
                   const SizedBox(height: 24),
 
@@ -682,21 +859,22 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
                             ),
                           )
                         else
-                          ListView.builder(
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            itemCount: displayEvents.length,
-                            itemBuilder: (context, index) {
-                              return TimelineEventCard(
-                                event: displayEvents[index],
-                                isFirst: index == 0,
-                                isLast: index == displayEvents.length - 1,
-                              );
-                            },
-                          ),
-                      ],
-                    ),
-                  ),
+                      ListView.builder(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        itemCount: displayEvents.length,
+                        itemBuilder: (context, index) {
+                          final event = displayEvents[index];
+                          return _TimelineTile(
+                            event: event,
+                            isFirst: index == 0,
+                            isLast: index == displayEvents.length - 1,
+                          );
+                        },
+                      ),
+                  ],
+                ),
+              ),
                 ],
               ),
             ),
