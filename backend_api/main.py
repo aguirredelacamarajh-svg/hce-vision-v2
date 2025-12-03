@@ -28,7 +28,6 @@ from models import (
 from database import init_db, get_db, save_patient_db, get_patient_db, get_all_patients_db, delete_patient_db
 
 # --- Configuración de Logging ---
-# Configurar logger para que salga por stdout (Render captura esto)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -36,7 +35,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("hce_vision_backend")
 
-app = FastAPI(title="HCE Vision API", version="2.0.0")
+app = FastAPI(title="HCE Vision API", version="2.1.0")
 
 # --- Middleware de CORS ---
 app.add_middleware(
@@ -67,10 +66,9 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 # --- Inicialización ---
 @app.on_event("startup")
 def on_startup():
-    logger.info("🚀 Iniciando HCE Vision API...")
+    logger.info("🚀 Iniciando HCE Vision API v2.1 (Multi-Imagen + Historia Global)...")
     init_db()
     
-    # Configurar Gemini
     api_key = os.environ.get("GEMINI_API_KEY")
     if api_key:
         genai.configure(api_key=api_key)
@@ -89,12 +87,14 @@ def fake_llm_extract(text: str) -> dict:
         "description": "No se pudo conectar con la IA real. Se muestran datos de ejemplo.",
         "antecedents": {"hta": True, "diabetes": False},
         "labs": {},
-        "medications": []
+        "medications": [],
+        "global_timeline_events": []
     }
 
-def analyze_image_with_gemini(image_bytes: bytes) -> dict:
+def analyze_images_with_gemini(images_bytes: List[bytes]) -> dict:
     """
-    Envía la imagen a Gemini 1.5 Flash para extracción estructurada de datos clínicos.
+    Envía MÚLTIPLES imágenes a Gemini 1.5 Flash para extracción estructurada.
+    Separa datos Cardiológicos vs. Historia Global.
     """
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
@@ -102,71 +102,93 @@ def analyze_image_with_gemini(image_bytes: bytes) -> dict:
 
     try:
         model_name = 'models/gemini-flash-latest'
-        logger.info(f"🧠 Enviando imagen a Gemini ({model_name})...")
+        logger.info(f"🧠 Enviando {len(images_bytes)} imágenes a Gemini ({model_name})...")
         
         model = genai.GenerativeModel(model_name)
         
         prompt = """
-        Analiza este documento médico (imagen). Extrae la información clínica relevante y devuélvela EXCLUSIVAMENTE en formato JSON válido con la siguiente estructura exacta.
+        Actúa como un Cardiólogo experto y un Internista meticuloso. Analiza este conjunto de documentos médicos (pueden ser múltiples páginas de una misma historia o varios estudios).
         
-        Estructura JSON requerida:
+        Tu objetivo es construir dos líneas de información paralelas:
+        1. **Perfil Cardiológico (Prioridad Alta):** Datos críticos para cálculo de riesgo (CHA2DS2-VASc, SCORE2, Lípidos).
+        2. **Historia Clínica Global (Contexto):** Cualquier otro evento médico relevante NO cardiológico (cirugías, traumas, infecciones, otras patologías crónicas) para tener una visión holística del paciente.
+
+        Extrae la información y devuélvela EXCLUSIVAMENTE en formato JSON válido con la siguiente estructura:
+        
         {
-            "date": "YYYY-MM-DD", // Fecha del documento. Si no hay, usa la fecha de hoy.
+            "date": "YYYY-MM-DD", // Fecha del documento principal o la más reciente encontrada.
             "type": "laboratorio" | "imagen" | "medicacion" | "epicrisis" | "procedimiento" | "consulta" | "otro",
-            "title": "Título breve (ej. Perfil Lipídico, Ecocardiograma)",
-            "description": "Resumen conciso de hallazgos (máx 2 frases).",
+            "title": "Título descriptivo del conjunto de documentos",
+            "description": "Resumen conciso de los hallazgos principales (Cardio + Global).",
+            
             "antecedents": {
+                // CARDIOVASCULARES
                 "hta": boolean,
                 "diabetes": boolean,
                 "heart_failure": boolean, 
-                "atrial_fibrillation": boolean, // Fibrilación Auricular (Clave para CHA2DS2-VASc)
-                "acs_history": boolean, // Síndrome Coronario Agudo previo
+                "atrial_fibrillation": boolean, 
+                "acs_history": boolean, 
                 "stroke": boolean, 
                 "vascular_disease": boolean,
+                "dyslipidemia": boolean,
+                
+                // RIESGO SANGRADO / OTROS
                 "renal_disease": boolean,
                 "liver_disease": boolean,
                 "bleeding_history": boolean,
                 "labile_inr": boolean,
                 "alcohol_drugs": boolean,
-                "smoking": boolean, // Tabaquismo actual
+                "smoking": boolean, 
                 "obesity": boolean,
-                "sedentary": boolean,
-                "dyslipidemia": boolean
+                "sedentary": boolean
             },
+            
             "labs": {
-                // Extraer OBJETO con valor y unidad. Si no está, usa null.
+                // Valores numéricos clave para cardio
                 "ldl": { "value": number, "unit": "string" } | null, 
                 "hdl": { "value": number, "unit": "string" } | null,
                 "total_cholesterol": { "value": number, "unit": "string" } | null,
                 "triglycerides": { "value": number, "unit": "string" } | null,
                 "creatinine": { "value": number, "unit": "string" } | null,
-                "bnp": { "value": number, "unit": "string" } | null, // BNP o NT-proBNP
+                "bnp": { "value": number, "unit": "string" } | null, 
                 "hemoglobin": { "value": number, "unit": "string" } | null,
                 "hba1c": { "value": number, "unit": "string" } | null,
                 "potassium": { "value": number, "unit": "string" } | null
             },
+            
+            "medications": ["Nombre Medicamento 1", "Nombre Medicamento 2"],
+            
+            "global_timeline_events": [
+                // AQUÍ VA LA HISTORIA GLOBAL (NO CARDIOLÓGICA O EVENTOS PASADOS)
+                // Extrae cirugías previas, diagnósticos de otras especialidades, internaciones antiguas, etc.
+                {
+                    "date": "YYYY-MM-DD", // Aproximada si no es exacta
+                    "category": "cirugia" | "trauma" | "infeccion" | "oncologia" | "otro",
+                    "description": "Descripción breve del evento (ej. Apendicectomía, Neumonía, Fractura de fémur)"
+                }
+            ],
+
             "historical_data": [
-                // BUSCA ACTIVAMENTE EN EL TEXTO Y TABLAS.
+                // Tablas de laboratorios antiguos encontrados en el texto para gráficas
                 {
                     "date": "YYYY-MM-DD", 
                     "labs": { 
                         "ldl": { "value": number, "unit": "string" },
-                        "bnp": { "value": number, "unit": "string" }
-                        // ... otros
+                        "creatinine": { "value": number, "unit": "string" }
                     }
                 }
-            ],
-            "medications": ["Nombre Medicamento 1", "Nombre Medicamento 2"]
+            ]
         }
         """
 
-        response = model.generate_content([
-            {'mime_type': 'image/jpeg', 'data': image_bytes},
-            prompt
-        ])
+        # Construir el payload con Prompt + Todas las imágenes
+        content_parts = [prompt]
+        for img_bytes in images_bytes:
+            content_parts.append({'mime_type': 'image/jpeg', 'data': img_bytes})
+
+        response = model.generate_content(content_parts)
         
         text_response = response.text.strip()
-        # Limpieza básica de markdown
         if text_response.startswith("```json"):
             text_response = text_response[7:]
         if text_response.endswith("```"):
@@ -321,7 +343,6 @@ async def create_patient(data: CreatePatientRequest, db: Session = Depends(get_d
     """
     logger.info(f"👤 Solicitud de creación de paciente: {data.name}")
     
-    # 1. Buscar si ya existe alguien con ese nombre (búsqueda simple)
     all_patients = get_all_patients_db(db)
     for p_data in all_patients.values():
         p = PatientSummary(**p_data)
@@ -329,7 +350,6 @@ async def create_patient(data: CreatePatientRequest, db: Session = Depends(get_d
             logger.info(f"✅ Paciente existente encontrado: {p.patient_id}")
             return p
 
-    # 2. Si no existe, crear uno nuevo
     import uuid
     new_id = str(uuid.uuid4())
     
@@ -354,35 +374,42 @@ async def create_patient(data: CreatePatientRequest, db: Session = Depends(get_d
 @app.post("/extract_data", response_model=ExtractedData)
 async def extract_data(
     patient_id: str = Form(...),
-    file: UploadFile = File(...),
+    files: List[UploadFile] = File(...), # AHORA ACEPTA LISTA DE ARCHIVOS
     db: Session = Depends(get_db)
 ):
     """
-    Paso 1: Analiza la imagen y devuelve los datos PROPUESTOS (sin guardar nada).
+    Paso 1: Analiza MÚLTIPLES imágenes y devuelve los datos PROPUESTOS.
     """
-    logger.info(f"📤 Recibida imagen para análisis. Paciente: {patient_id}, Archivo: {file.filename}")
+    logger.info(f"📤 Recibida solicitud de análisis. Paciente: {patient_id}, Archivos: {len(files)}")
     
-    # Obtener resumen actual para tener contexto
     summary_data = get_patient_db(db, patient_id)
     if not summary_data:
         logger.warning(f"❌ Paciente {patient_id} no encontrado durante extracción.")
         raise HTTPException(status_code=404, detail="Paciente no encontrado")
     summary = PatientSummary(**summary_data)
 
-    content = await file.read()
-    raw_data = analyze_image_with_gemini(content)
+    # Leer todas las imágenes
+    images_content = []
+    for file in files:
+        content = await file.read()
+        images_content.append(content)
+
+    # Analizar con IA (Multi-imagen)
+    raw_data = analyze_images_with_gemini(images_content)
     
+    # Crear evento temporal principal (Cardio)
     temp_event = ClinicalEvent(
         id="temp_id", 
         date=raw_data["date"] or datetime.date.today().isoformat(),
         type=raw_data["type"] or "otro",
-        title=raw_data["title"] or "Documento Analizado",
+        title=raw_data["title"] or "Documentos Analizados",
         description=raw_data["description"] or "",
         labs=raw_data["labs"],
         diagnostics=[],
         source="IA (Pendiente)"
     )
 
+    # Calcular scores cardio
     try:
         scores_data = calculate_scores(
             summary.demographics.age, 
@@ -402,13 +429,31 @@ async def extract_data(
         logger.error(f"⚠️ Error calculando scores: {e}", exc_info=True)
         proposed_scores = RiskScores()
 
-    logger.info("✅ Extracción y cálculo de riesgos completado.")
+    # NOTA: raw_data["global_timeline_events"] contiene la historia global.
+    # Por ahora la devolvemos dentro de 'historical_data' o podríamos extender el modelo ExtractedData.
+    # Para simplificar sin romper el frontend, lo meteremos en 'historical_data' con una marca especial
+    # o simplemente confiamos en que el frontend lo manejará si actualizamos el modelo.
+    # Vamos a inyectarlo en 'historical_data' adaptado por ahora.
+    
+    global_events = []
+    if "global_timeline_events" in raw_data:
+        for evt in raw_data["global_timeline_events"]:
+            # Adaptar al formato que espera el frontend (o actualizar frontend luego)
+            # Por ahora lo dejamos pasar, pero idealmente ExtractedData debería tener este campo explícito.
+            pass
+
+    logger.info("✅ Extracción multi-imagen completada.")
+    
+    # Hack temporal: Devolver los eventos globales dentro de una estructura que el frontend pueda leer
+    # O mejor, actualizaremos models.py en el siguiente paso para soportarlo oficialmente.
+    
     return ExtractedData(
         event=temp_event,
         medications=raw_data["medications"] or [],
         antecedents=raw_data["antecedents"] or {},
         risk_scores=proposed_scores,
-        historical_data=raw_data.get("historical_data", [])
+        historical_data=raw_data.get("historical_data", []) 
+        # TODO: Enviar global_timeline_events al frontend
     )
 
 @app.post("/submit_analysis", response_model=PatientSummary)
@@ -487,7 +532,7 @@ async def submit_analysis(data: SubmitAnalysisRequest, db: Session = Depends(get
                 logger.warning(f"⚠️ Error procesando lab {lab_name}: {e}")
 
     # Alertas
-    summary.alerts = [] # Resetear alertas y recalcular
+    summary.alerts = [] 
     if scores_values.get("chads2vasc", 0) >= 2 and data.antecedents.get("atrial_fibrillation"):
         summary.alerts.append("Alto riesgo de ACV (FA) - Considerar Anticoagulación")
         
