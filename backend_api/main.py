@@ -33,62 +33,6 @@ from database import init_db, get_db, save_patient_db, get_patient_db, get_all_p
 
 # ... (existing endpoints)
 
-@app.post("/patients/{patient_id}/blood_pressure", response_model=PatientSummary)
-async def add_blood_pressure(patient_id: str, record: BloodPressureRecord, db: Session = Depends(get_db)):
-    """Agrega un registro de presión arterial al historial del paciente."""
-    logger.info(f"❤️ Agregando TA para paciente {patient_id}: {record}")
-    
-    summary_data = get_patient_db(db, patient_id)
-    if not summary_data:
-        raise HTTPException(status_code=404, detail="Paciente no encontrado")
-    summary = PatientSummary(**summary_data)
-    
-    summary.blood_pressure_history.append(record)
-    # Ordenar por fecha y hora descendente (más reciente primero)
-    summary.blood_pressure_history.sort(key=lambda x: f"{x.date} {x.time}", reverse=True)
-    
-    save_patient_db(db, summary)
-    return summary
-
-@app.patch("/patients/{patient_id}", response_model=PatientSummary)
-async def update_patient_manual(patient_id: str, update_data: UpdatePatientRequest, db: Session = Depends(get_db)):
-    """
-    Actualiza manualmente datos del paciente (edición por usuario).
-    Permite modificar demografía, antecedentes, scores, medicación, etc.
-    """
-    logger.info(f"✏️ Actualización manual para paciente {patient_id}")
-    
-    summary_data = get_patient_db(db, patient_id)
-    if not summary_data:
-        raise HTTPException(status_code=404, detail="Paciente no encontrado")
-    summary = PatientSummary(**summary_data)
-    
-    # Aplicar actualizaciones parciales
-    if update_data.demographics:
-        summary.demographics = update_data.demographics
-        
-    if update_data.antecedents:
-        summary.antecedents = update_data.antecedents
-        # Recalcular scores si cambian antecedentes? 
-        # Por ahora confiamos en que el usuario edita lo que quiere, 
-        # o podríamos disparar un recálculo opcional.
-        
-    if update_data.risk_scores:
-        summary.risk_scores = update_data.risk_scores
-        
-    if update_data.medications is not None:
-        summary.medications = update_data.medications
-        
-    if update_data.clinical_summary:
-        summary.clinical_summary = update_data.clinical_summary
-        
-    save_patient_db(db, summary)
-    logger.info("✅ Paciente actualizado manualmente.")
-    return summary
-
-if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
-
 # --- Configuración de Logging ---
 logging.basicConfig(
     level=logging.INFO,
@@ -703,6 +647,59 @@ async def delete_patient(patient_id: str, db: Session = Depends(get_db)):
     if not success:
         raise HTTPException(status_code=404, detail="Paciente no encontrado")
     return {"message": "Paciente eliminado"}
+
+@app.post("/patients/{patient_id}/blood_pressure", response_model=PatientSummary)
+async def add_blood_pressure(patient_id: str, record: BloodPressureRecord, db: Session = Depends(get_db)):
+    """Agrega un registro de presión arterial al historial del paciente."""
+    logger.info(f"❤️ Agregando TA para paciente {patient_id}: {record}")
+    
+    summary_data = get_patient_db(db, patient_id)
+    if not summary_data:
+        raise HTTPException(status_code=404, detail="Paciente no encontrado")
+    summary = PatientSummary(**summary_data)
+    
+    summary.blood_pressure_history.append(record)
+    # Ordenar por fecha y hora descendente (más reciente primero)
+    summary.blood_pressure_history.sort(key=lambda x: f"{x.date} {x.time}", reverse=True)
+    
+    save_patient_db(db, summary)
+    return summary
+
+@app.patch("/patients/{patient_id}", response_model=PatientSummary)
+async def update_patient_manual(patient_id: str, update_data: UpdatePatientRequest, db: Session = Depends(get_db)):
+    """
+    Actualiza manualmente datos del paciente (edición por usuario).
+    Permite modificar demografía, antecedentes, scores, medicación, etc.
+    """
+    logger.info(f"✏️ Actualización manual para paciente {patient_id}")
+    
+    summary_data = get_patient_db(db, patient_id)
+    if not summary_data:
+        raise HTTPException(status_code=404, detail="Paciente no encontrado")
+    summary = PatientSummary(**summary_data)
+    
+    # Aplicar actualizaciones parciales
+    if update_data.demographics:
+        summary.demographics = update_data.demographics
+        
+    if update_data.antecedents:
+        summary.antecedents = update_data.antecedents
+        # Recalcular scores si cambian antecedentes? 
+        # Por ahora confiamos en que el usuario edita lo que quiere, 
+        # o podríamos disparar un recálculo opcional.
+        
+    if update_data.risk_scores:
+        summary.risk_scores = update_data.risk_scores
+        
+    if update_data.medications is not None:
+        summary.medications = update_data.medications
+        
+    if update_data.clinical_summary:
+        summary.clinical_summary = update_data.clinical_summary
+        
+    save_patient_db(db, summary)
+    logger.info("✅ Paciente actualizado manualmente.")
+    return summary
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
