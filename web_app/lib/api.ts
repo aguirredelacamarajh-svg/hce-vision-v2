@@ -130,3 +130,23 @@ export async function submitAnalysis(payload: {
   });
   return handleResponse<PatientDetail>(response);
 }
+
+export type UpdatePatientRequest = {
+  demographics?: PatientDemographics;
+  antecedents?: Record<string, boolean>;
+  risk_scores?: RiskScores;
+  medications?: { name: string; dose?: string; schedule?: string; route?: string }[];
+  clinical_summary?: string;
+};
+
+export async function updatePatient(
+  patientId: string,
+  payload: UpdatePatientRequest
+): Promise<PatientDetail> {
+  const response = await fetch(`${API_BASE}/patients/${patientId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handleResponse<PatientDetail>(response);
+}

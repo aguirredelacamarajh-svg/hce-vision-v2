@@ -19,6 +19,7 @@ import {
   PatientDetail,
   extractData,
   submitAnalysis,
+  updatePatient,
 } from "../../../../lib/api";
 
 type Tab = "cardio" | "global";
@@ -79,6 +80,15 @@ export default function PatientDetailPage() {
   const [extractError, setExtractError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
+
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [editForm, setEditForm] = useState<{
+    name: string;
+    age: number;
+    sex: string;
+    clinical_summary: string;
+  }>({ name: "", age: 0, sex: "", clinical_summary: "" });
+  const [updating, setUpdating] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -182,6 +192,39 @@ export default function PatientDetailPage() {
     }
   };
 
+  const openEditModal = () => {
+    if (!summary) return;
+    setEditForm({
+      name: summary.demographics.name,
+      age: summary.demographics.age,
+      sex: summary.demographics.sex,
+      clinical_summary: summary.clinical_summary || "",
+    });
+    setEditModalOpen(true);
+  };
+
+  const doUpdate = async () => {
+    if (!patientId) return;
+    setUpdating(true);
+    try {
+      await updatePatient(patientId, {
+        demographics: {
+          name: editForm.name,
+          age: editForm.age,
+          sex: editForm.sex,
+        },
+        clinical_summary: editForm.clinical_summary,
+      });
+      const refreshed = await fetchPatientSummary(patientId);
+      setSummary(refreshed);
+      setEditModalOpen(false);
+    } catch (err) {
+      alert("Error actualizando paciente");
+    } finally {
+      setUpdating(false);
+    }
+  };
+
   if (!patientId) {
     return (
       <div className="min-h-screen bg-gradient-to-b from-sky-50 via-white to-white text-slate-900">
@@ -243,6 +286,12 @@ export default function PatientDetailPage() {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={openEditModal}
+              className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-slate-600 shadow-sm ring-1 ring-slate-200 transition hover:bg-slate-50"
+            >
+              ✏️ Editar
+            </button>
             <button
               onClick={() => setModalOpen(true)}
               className="rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white shadow-md shadow-sky-200 transition hover:-translate-y-0.5 hover:bg-sky-700"
@@ -445,6 +494,72 @@ export default function PatientDetailPage() {
           </div>
         )}
       </div>
+
+      {/* EDIT MODAL */}
+      {editModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-lg rounded-2xl border border-slate-100 bg-white p-6 shadow-2xl shadow-sky-100">
+            <h3 className="mb-4 text-lg font-semibold text-slate-900">Editar Paciente</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Nombre</label>
+                <input
+                  type="text"
+                  value={editForm.name}
+                  onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">Edad</label>
+                  <input
+                    type="number"
+                    value={editForm.age}
+                    onChange={(e) => setEditForm({ ...editForm, age: parseInt(e.target.value) || 0 })}
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">Sexo</label>
+                  <select
+                    value={editForm.sex}
+                    onChange={(e) => setEditForm({ ...editForm, sex: e.target.value })}
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
+                  >
+                    <option value="M">Masculino</option>
+                    <option value="F">Femenino</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Resumen Clínico</label>
+                <textarea
+                  value={editForm.clinical_summary}
+                  onChange={(e) => setEditForm({ ...editForm, clinical_summary: e.target.value })}
+                  rows={4}
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
+                />
+              </div>
+            </div>
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                onClick={() => setEditModalOpen(false)}
+                className="rounded-xl px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={doUpdate}
+                disabled={updating}
+                className="rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white shadow-md shadow-sky-200 hover:bg-sky-700 disabled:opacity-70"
+              >
+                {updating ? "Guardando..." : "Guardar Cambios"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {modalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 px-4 backdrop-blur-sm">
