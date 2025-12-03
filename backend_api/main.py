@@ -208,6 +208,21 @@ def analyze_images_with_gemini(images_bytes: List[bytes]) -> dict:
         logger.error(f"❌ Error llamando a Gemini: {e}", exc_info=True)
         return fake_llm_extract("error_fallback")
 
+def safe_float(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return None
+
+def safe_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.lower() in ('true', '1', 't', 'y', 'yes')
+    return bool(value)
+
 def calculate_lipid_management(age: int, antecedents: dict, ldl_val: Optional[float]) -> Optional[LipidManagement]:
     """Calcula metas de LDL y recomendación de estatinas según riesgo cardiovascular (ESC Guidelines)."""
     if ldl_val is None:
@@ -218,15 +233,15 @@ def calculate_lipid_management(age: int, antecedents: dict, ldl_val: Optional[fl
     target = 116.0
     
     # Definiciones simplificadas
-    has_acs = antecedents.get("acs_history")
-    has_stroke = antecedents.get("stroke")
-    has_cvd = antecedents.get("vascular_disease") or has_acs or has_stroke
-    has_dm = antecedents.get("diabetes")
-    has_ckd = antecedents.get("renal_disease")
-    has_fh = antecedents.get("dyslipidemia") 
+    has_acs = safe_bool(antecedents.get("acs_history"))
+    has_stroke = safe_bool(antecedents.get("stroke"))
+    has_cvd = safe_bool(antecedents.get("vascular_disease")) or has_acs or has_stroke
+    has_dm = safe_bool(antecedents.get("diabetes"))
+    has_ckd = safe_bool(antecedents.get("renal_disease"))
+    has_fh = safe_bool(antecedents.get("dyslipidemia")) 
     
     # Lógica de Riesgo
-    if has_acs and (has_dm or has_ckd or antecedents.get("smoking")):
+    if has_acs and (has_dm or has_ckd or safe_bool(antecedents.get("smoking"))):
          risk_cat = "Extremo"
          target = 40.0
     elif has_cvd:
@@ -235,7 +250,7 @@ def calculate_lipid_management(age: int, antecedents: dict, ldl_val: Optional[fl
     elif has_dm or has_ckd or has_fh:
         risk_cat = "Alto"
         target = 70.0
-    elif age > 50 and (antecedents.get("hta") or antecedents.get("smoking") or antecedents.get("obesity")):
+    elif age > 50 and (safe_bool(antecedents.get("hta")) or safe_bool(antecedents.get("smoking")) or safe_bool(antecedents.get("obesity"))):
         risk_cat = "Moderado"
         target = 100.0
     
@@ -273,16 +288,16 @@ def calculate_scores(age: int, sex: str, antecedents: dict, labs: dict = {}) -> 
     details = {}
 
     # --- 1. Fibrilación Auricular (CHA2DS2-VASc & HAS-BLED) ---
-    if antecedents.get("atrial_fibrillation"):
+    if safe_bool(antecedents.get("atrial_fibrillation")):
         # CHA2DS2-VASc
         cha = 0
-        if antecedents.get("heart_failure"): cha += 1
-        if antecedents.get("hta"): cha += 1
+        if safe_bool(antecedents.get("heart_failure")): cha += 1
+        if safe_bool(antecedents.get("hta")): cha += 1
         if age >= 75: cha += 2
         elif age >= 65: cha += 1
-        if antecedents.get("diabetes"): cha += 1
-        if antecedents.get("stroke"): cha += 2
-        if antecedents.get("vascular_disease"): cha += 1
+        if safe_bool(antecedents.get("diabetes")): cha += 1
+        if safe_bool(antecedents.get("stroke")): cha += 2
+        if safe_bool(antecedents.get("vascular_disease")): cha += 1
         if sex == 'F': cha += 1
         
         risk_txt = "Alto Riesgo (Anticoagular)" if cha >= 2 else ("Considerar Anticoagulación" if cha == 1 else "Bajo Riesgo")
@@ -291,14 +306,14 @@ def calculate_scores(age: int, sex: str, antecedents: dict, labs: dict = {}) -> 
 
         # HAS-BLED
         hb = 0
-        if antecedents.get("hta"): hb += 1
-        if antecedents.get("renal_disease"): hb += 1
-        if antecedents.get("liver_disease"): hb += 1
-        if antecedents.get("stroke"): hb += 1
-        if antecedents.get("bleeding_history"): hb += 1
-        if antecedents.get("labile_inr"): hb += 1
+        if safe_bool(antecedents.get("hta")): hb += 1
+        if safe_bool(antecedents.get("renal_disease")): hb += 1
+        if safe_bool(antecedents.get("liver_disease")): hb += 1
+        if safe_bool(antecedents.get("stroke")): hb += 1
+        if safe_bool(antecedents.get("bleeding_history")): hb += 1
+        if safe_bool(antecedents.get("labile_inr")): hb += 1
         if age > 65: hb += 1
-        if antecedents.get("alcohol_drugs"): hb += 1
+        if safe_bool(antecedents.get("alcohol_drugs")): hb += 1
         
         hb_risk = "Alto Riesgo Sangrado" if hb >= 3 else "Bajo Riesgo Sangrado"
         scores["has_bled"] = hb
@@ -308,9 +323,9 @@ def calculate_scores(age: int, sex: str, antecedents: dict, labs: dict = {}) -> 
     score2_val = None
     if 40 <= age <= 69: 
         base_risk = 1.0
-        if antecedents.get("smoking"): base_risk *= 2.0
-        if antecedents.get("diabetes"): base_risk *= 1.5
-        if antecedents.get("hta"): base_risk *= 1.3
+        if safe_bool(antecedents.get("smoking")): base_risk *= 2.0
+        if safe_bool(antecedents.get("diabetes")): base_risk *= 1.5
+        if safe_bool(antecedents.get("hta")): base_risk *= 1.3
         
         age_factor = (age - 40) / 10.0
         score2_val = round(base_risk * (1 + age_factor), 1)
@@ -328,9 +343,9 @@ def calculate_scores(age: int, sex: str, antecedents: dict, labs: dict = {}) -> 
     ldl_val = None
     
     if isinstance(ldl_data, dict) and "value" in ldl_data:
-        ldl_val = ldl_data["value"]
-    elif isinstance(ldl_data, (int, float)):
-        ldl_val = float(ldl_data)
+        ldl_val = safe_float(ldl_data["value"])
+    elif isinstance(ldl_data, (int, float, str)):
+        ldl_val = safe_float(ldl_data)
         
     lipid_mgmt = calculate_lipid_management(age, antecedents, ldl_val)
     if lipid_mgmt:
