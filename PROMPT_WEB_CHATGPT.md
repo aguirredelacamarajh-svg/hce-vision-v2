@@ -128,3 +128,28 @@ Cuando la API responda, muestra los resultados en dos pestañas o secciones clar
 
 ### Tarea 4: Confirmación
 - Al guardar (`/submit_analysis`), asegúrate de enviar también los `global_timeline_events` confirmados para que se guarden en el perfil del paciente.
+
+---
+
+## FASE 4: REESTRUCTURACIÓN UI/UX (MODO PACIENTE Y MÉDICO)
+
+Hemos definido una nueva especificación de diseño completa (`DESIGN_SPEC_V2.md`).
+
+### Tarea 1: Navegación y Modos
+- Implementa una **Splash Screen** simple.
+- Crea una **Home** que permita elegir entre "Soy Paciente" y "Soy Médico".
+- **Modo Médico:** Usa la vista actual `dashboard/patient/[id]` pero refínala para que sea un "Dashboard Pro" (más denso, todos los scores).
+- **Modo Paciente:** Crea una NUEVA vista simplificada y educativa (ver especificación).
+
+### Tarea 2: Vista Paciente (Cardio-Centric)
+Implementa la pantalla principal del paciente con este orden:
+1.  **Header:** Datos básicos.
+2.  **Riesgos:** Badges de factores de riesgo.
+3.  **Metas:** Tarjeta de LDL (Valor vs Meta) y Scores (con colores semánticos).
+4.  **Registro TA:** Un componente para ver/agregar presión arterial (UI mockeada por ahora).
+5.  **Accesos:** Botones grandes para "Ver mis laboratorios" (Gráficos) y "Mis Estudios".
+
+### Tarea 3: Componentes de Visualización
+- Usa `recharts` (que ya instalamos) para crear un **Explorador de Laboratorios**: un dropdown para elegir qué curva ver (LDL, Glucosa, etc.), en lugar de mostrar todas juntas.
+
+**Referencia:** Lee el archivo `DESIGN_SPEC_V2.md` en la raíz para todos los detalles de diseño.
