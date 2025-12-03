@@ -57,6 +57,13 @@ class Demographics(BaseModel):
     age: int
     sex: str
 
+class BloodPressureRecord(BaseModel):
+    date: str # YYYY-MM-DD
+    time: str # HH:MM
+    systolic: int
+    diastolic: int
+    heart_rate: Optional[int] = None
+
 class PatientSummary(BaseModel):
     patient_id: str
     demographics: Demographics
@@ -67,6 +74,7 @@ class PatientSummary(BaseModel):
     risk_factors: List[str] = [] # "Tabaquismo", "Sedentarismo", "Obesidad"
     antecedents: Dict[str, bool] = {} # Nuevo campo para guardar el estado completo
     global_timeline: List[GlobalEvent] = [] # NUEVO: Historia Global
+    blood_pressure_history: List[BloodPressureRecord] = [] # NUEVO: Registro de TA
     clinical_summary: str
     alerts: List[str]
 
@@ -103,3 +111,12 @@ class CreatePatientRequest(BaseModel):
     name: str
     age: int
     sex: str
+
+class UpdatePatientRequest(BaseModel):
+    """Modelo para actualizaciones manuales parciales."""
+    demographics: Optional[Demographics] = None
+    antecedents: Optional[Dict[str, bool]] = None
+    risk_scores: Optional[RiskScores] = None
+    medications: Optional[List[Medication]] = None
+    clinical_summary: Optional[str] = None
+
