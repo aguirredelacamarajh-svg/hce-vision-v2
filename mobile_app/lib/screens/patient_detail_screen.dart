@@ -31,39 +31,7 @@ class PatientDetailScreen extends StatefulWidget {
   State<PatientDetailScreen> createState() => _PatientDetailScreenState();
 }
 
-class _SkeletonDetail extends StatelessWidget {
-  const _SkeletonDetail();
 
-  Widget _box({double height = 90, double radius = 12}) {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      height: height,
-      decoration: BoxDecoration(
-        color: Colors.grey.shade200,
-        borderRadius: BorderRadius.circular(radius),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      physics: const AlwaysScrollableScrollPhysics(),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const SizedBox(height: 16),
-          _box(height: 80),
-          _box(height: 140),
-          _box(height: 180),
-          _box(height: 120),
-          _box(height: 240),
-          const SizedBox(height: 40),
-        ],
-      ),
-    );
-  }
-}
 
 class _PatientDetailScreenState extends State<PatientDetailScreen> {
   final Repository _repository = Repository();
