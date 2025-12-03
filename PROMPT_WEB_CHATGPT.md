@@ -152,4 +152,19 @@ Implementa la pantalla principal del paciente con este orden:
 ### Tarea 3: Componentes de Visualización
 - Usa `recharts` (que ya instalamos) para crear un **Explorador de Laboratorios**: un dropdown para elegir qué curva ver (LDL, Glucosa, etc.), en lugar de mostrar todas juntas.
 
+### Tarea 4: Auto-registro de Tensión Arterial (Funcional)
+- Implementa el componente de registro de TA.
+- **Endpoint:** `POST /patients/{id}/blood_pressure`
+- **Body:** `{ date: "YYYY-MM-DD", time: "HH:MM", systolic: 120, diastolic: 80, heart_rate: 70 }`
+- Muestra el historial y un gráfico de tendencia de la TA.
+
+### Tarea 5: Edición Manual (Empoderamiento del Paciente)
+- Permite que el usuario edite sus propios datos si detecta un error o quiere actualizar algo.
+- Agrega un botón "Editar Perfil" que habilite inputs en:
+  - Datos demográficos.
+  - Antecedentes (Checkboxes).
+  - Medicación (Lista editable).
+- **Endpoint:** `PATCH /patients/{id}`
+- **Body:** `{ demographics: {...}, antecedents: {...}, ... }` (envía solo lo modificado).
+
 **Referencia:** Lee el archivo `DESIGN_SPEC_V2.md` en la raíz para todos los detalles de diseño.
