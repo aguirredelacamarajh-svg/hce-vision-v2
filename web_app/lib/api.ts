@@ -24,6 +24,12 @@ export type RiskScores = {
   score2?: number;
 };
 
+export type GlobalEvent = {
+  date: string;
+  category: string;
+  description: string;
+};
+
 export type PatientDetail = {
   patient_id: string;
   demographics: PatientDemographics;
@@ -31,6 +37,16 @@ export type PatientDetail = {
   alerts?: string[];
   timeline?: ClinicalEvent[];
   risk_scores?: RiskScores;
+  global_timeline_events?: GlobalEvent[];
+};
+
+export type ExtractedData = {
+  event?: ClinicalEvent;
+  medications?: string[];
+  antecedents?: Record<string, boolean>;
+  risk_scores?: RiskScores;
+  historical_data?: Record<string, unknown>[];
+  global_timeline_events?: GlobalEvent[];
 };
 
 const API_BASE =
@@ -66,6 +82,34 @@ export async function fetchPatientSummary(id: string): Promise<PatientDetail> {
   const cleanId = id.trim();
   const response = await fetch(`${API_BASE}/patients/${cleanId}/summary`, {
     cache: "no-store",
+  });
+  return handleResponse<PatientDetail>(response);
+}
+
+export async function extractData(patientId: string, files: File[]): Promise<ExtractedData> {
+  const formData = new FormData();
+  formData.append("patient_id", patientId);
+  files.forEach((file) => formData.append("files", file));
+
+  const response = await fetch(`${API_BASE}/extract_data`, {
+    method: "POST",
+    body: formData,
+  });
+  return handleResponse<ExtractedData>(response);
+}
+
+export async function submitAnalysis(payload: {
+  patient_id: string;
+  event?: ClinicalEvent;
+  medications?: string[];
+  antecedents?: Record<string, boolean>;
+  historical_data?: Record<string, unknown>[];
+  global_timeline_events?: GlobalEvent[];
+}): Promise<PatientDetail> {
+  const response = await fetch(`${API_BASE}/submit_analysis`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
   });
   return handleResponse<PatientDetail>(response);
 }
