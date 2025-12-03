@@ -89,31 +89,42 @@ Ahora que la Landing Page está lista, necesitamos funcionalidad real.
 
 ---
 **Instrucción para ChatGPT:**
-"Hola, ya terminé la Fase 2 (Dashboard y Detalles). El código corregido está en la rama `chatgpt/web`. Por favor, procede con la **Fase 3: Escaneo de Documentos con IA**."
+"Hola, el Backend ha sido actualizado a la versión 2.1 con soporte para **Multi-Imagen** e **Historia Clínica Global**. Por favor, procede con la **Fase 3: Escaneo Avanzado y Visualización Global**."
 
-## FASE 3: Escaneo de Documentos con IA (🚀 NUEVO)
+## FASE 3: Escaneo Multi-Imagen e Historia Global (ACTUALIZADO)
 
-Ahora vamos a conectar la funcionalidad principal: **La Inteligencia Artificial**.
+El backend ahora es capaz de procesar múltiples imágenes a la vez y extraer una historia clínica paralela (no cardiológica).
 
-### Tarea 1: Servicio de Extracción
-**Archivo:** `lib/api.ts`
-- Agrega la función `extractData(patientId: string, file: File)`.
-- **Endpoint:** `POST https://hce-vision-api.onrender.com/extract_data`
-- **Body:** `FormData` con campos `patient_id` y `file`.
-- **Retorno:** JSON con `event`, `risk_scores`, `medications`, etc.
+### Tarea 1: Actualizar Cliente API (`lib/api.ts`)
+- Actualiza la función `extractData` para aceptar `files: File[]` (Array de archivos).
+- **Endpoint:** `POST /extract_data` ahora espera `files` (multipart) como una lista.
+- **Nuevos Tipos:** Actualiza las interfaces para incluir `GlobalEvent` y `global_timeline_events` en la respuesta.
+  ```typescript
+  interface GlobalEvent {
+    date: string;
+    category: string;
+    description: string;
+  }
+  // Agregar a ExtractedData y PatientSummary
+  ```
 
-### Tarea 2: UI de Escaneo en Detalle de Paciente
-**Archivo:** `app/dashboard/patient/[id]/page.tsx` (y nuevos componentes)
-- Agrega un botón flotante o destacado: **"📷 Escanear Documento"**.
-- Al hacer clic, abre un Modal que permita:
-  1. Seleccionar una imagen (input type file).
-  2. Mostrar preview de la imagen.
-  3. Botón "Analizar con IA".
+### Tarea 2: UI de Escaneo Mejorada
+**Archivo:** `app/dashboard/patient/[id]/page.tsx` (Componente `ScannerModal`)
+- Permite **seleccionar múltiples imágenes** a la vez (o agregar una por una).
+- Muestra una lista/carrusel de las miniaturas seleccionadas antes de enviar.
+- Botón "Analizar Documentos" (en plural).
 
-### Tarea 3: Visualización de Resultados
-- Cuando la API responda (puede tardar 5-10 seg), muestra los resultados en el mismo Modal o en uno nuevo.
-- Muestra:
-  - **Título del documento** (detectado por IA).
-  - **Valores extraídos** (ej: LDL, Glucosa).
-  - **Riesgos calculados** (ej: "Alto Riesgo").
-- (Opcional por ahora) Botón "Guardar en Historia Clínica" (que llamaría a `/submit_analysis`, pero primero logremos ver los datos).
+### Tarea 3: Visualización de Resultados (Dual)
+Cuando la API responda, muestra los resultados en dos pestañas o secciones claras:
+
+1.  **❤️ Perfil Cardiológico:**
+    - Lo que ya tenías: LDL, Riesgos (CHA2DS2-VASc), Medicación Cardio.
+    - *Prioridad Alta.*
+
+2.  **🌍 Historia Clínica Global (NUEVO):**
+    - Renderiza una línea de tiempo simple con los eventos de `global_timeline_events`.
+    - Ejemplo: "2018 - Cirugía: Apendicectomía", "2020 - Trauma: Fractura Tibia".
+    - Esto permite al médico ver el contexto general del paciente más allá del corazón.
+
+### Tarea 4: Confirmación
+- Al guardar (`/submit_analysis`), asegúrate de enviar también los `global_timeline_events` confirmados para que se guarden en el perfil del paciente.
