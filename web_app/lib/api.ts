@@ -150,3 +150,15 @@ export async function updatePatient(
   });
   return handleResponse<PatientDetail>(response);
 }
+
+export async function addBloodPressure(
+  patientId: string,
+  record: BloodPressureRecord
+): Promise<PatientDetail> {
+  const response = await fetch(`${API_BASE}/patients/${patientId}/blood_pressure`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(record),
+  });
+  return handleResponse<PatientDetail>(response);
+}

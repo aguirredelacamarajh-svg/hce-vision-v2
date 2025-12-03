@@ -20,9 +20,10 @@ import {
   extractData,
   submitAnalysis,
   updatePatient,
+  addBloodPressure,
 } from "../../../../lib/api";
 
-type Tab = "cardio" | "global";
+type Tab = "cardio" | "global" | "blood_pressure";
 
 const TrendChart = ({
   title,
@@ -90,6 +91,22 @@ export default function PatientDetailPage() {
   }>({ name: "", age: 0, sex: "", clinical_summary: "" });
   const [updating, setUpdating] = useState(false);
 
+  const [bpModalOpen, setBpModalOpen] = useState(false);
+  const [bpForm, setBpForm] = useState<{
+    date: string;
+    time: string;
+    systolic: number;
+    diastolic: number;
+    heart_rate: number;
+  }>({
+    date: new Date().toISOString().split("T")[0],
+    time: new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }),
+    systolic: 120,
+    diastolic: 80,
+    heart_rate: 70,
+  });
+  const [addingBp, setAddingBp] = useState(false);
+
   useEffect(() => {
     let isMounted = true;
     const load = async () => {
@@ -126,6 +143,11 @@ export default function PatientDetailPage() {
   const creatinineData =
     summary?.lab_trends?.creatinine?.map((d) => ({ date: d.date, value: d.value })) ?? [];
   const bnpData = summary?.lab_trends?.bnp?.map((d) => ({ date: d.date, value: d.value })) ?? [];
+
+  const bpHistory = summary?.blood_pressure_history ?? [];
+  const bpChartData = [...bpHistory]
+    .reverse()
+    .map((r) => ({ date: r.date, systolic: r.systolic, diastolic: r.diastolic }));
 
   const handleFiles = (list: FileList | null) => {
     if (!list) return;
@@ -222,6 +244,27 @@ export default function PatientDetailPage() {
       alert("Error actualizando paciente");
     } finally {
       setUpdating(false);
+    }
+  };
+
+  const doAddBP = async () => {
+    if (!patientId) return;
+    setAddingBp(true);
+    try {
+      await addBloodPressure(patientId, {
+        date: bpForm.date,
+        time: bpForm.time,
+        systolic: bpForm.systolic,
+        diastolic: bpForm.diastolic,
+        heart_rate: bpForm.heart_rate,
+      });
+      const refreshed = await fetchPatientSummary(patientId);
+      setSummary(refreshed);
+      setBpModalOpen(false);
+    } catch (err) {
+      alert("Error guardando tensión arterial");
+    } finally {
+      setAddingBp(false);
     }
   };
 
@@ -325,6 +368,7 @@ export default function PatientDetailPage() {
         <div className="flex items-center gap-2 rounded-2xl bg-slate-50 p-2">
           {[
             { key: "cardio", label: "❤️ Perfil cardiológico" },
+            { key: "blood_pressure", label: "🩺 Tensión Arterial" },
             { key: "global", label: "🌍 Historia global" },
           ].map((tab) => (
             <button
@@ -442,6 +486,99 @@ export default function PatientDetailPage() {
           </>
         )}
 
+        {activeTab === "blood_pressure" && (
+          <section className="space-y-6">
+            <div className="flex items-center justify-between rounded-3xl border border-slate-100 bg-white p-6 shadow-lg shadow-sky-50 ring-1 ring-slate-100">
+              <div>
+                <p className="text-sm font-semibold uppercase tracking-wide text-sky-700">
+                  Monitoreo de Tensión Arterial
+                </p>
+                <p className="text-lg font-semibold text-slate-900">Historial y Tendencias</p>
+              </div>
+              <button
+                onClick={() => setBpModalOpen(true)}
+                className="rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white shadow-md shadow-sky-200 transition hover:-translate-y-0.5 hover:bg-sky-700"
+              >
+                + Agregar Registro
+              </button>
+            </div>
+
+            {bpChartData.length > 1 ? (
+              <div className="rounded-3xl border border-slate-100 bg-white p-6 shadow-lg shadow-sky-50 ring-1 ring-slate-100">
+                <p className="mb-4 text-sm font-semibold uppercase tracking-wide text-slate-500">
+                  Tendencia (Sistólica / Diastólica)
+                </p>
+                <div className="h-64 w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={bpChartData}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                      <XAxis dataKey="date" tick={{ fontSize: 10 }} stroke="#94a3b8" />
+                      <YAxis tick={{ fontSize: 10 }} stroke="#94a3b8" domain={[40, 200]} />
+                      <Tooltip
+                        contentStyle={{
+                          borderRadius: "8px",
+                          border: "none",
+                          boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)",
+                        }}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="systolic"
+                        stroke="#ef4444"
+                        strokeWidth={2}
+                        name="Sistólica"
+                        dot={{ r: 3, fill: "#ef4444" }}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="diastolic"
+                        stroke="#3b82f6"
+                        strokeWidth={2}
+                        name="Diastólica"
+                        dot={{ r: 3, fill: "#3b82f6" }}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 p-6 text-center text-sm font-semibold text-slate-600">
+                Insuficientes datos para mostrar la gráfica. Agrega más registros.
+              </div>
+            )}
+
+            <div className="rounded-3xl border border-slate-100 bg-white p-6 shadow-lg shadow-sky-50 ring-1 ring-slate-100">
+              <p className="mb-4 text-sm font-semibold uppercase tracking-wide text-slate-500">
+                Registros Recientes
+              </p>
+              <div className="space-y-3">
+                {bpHistory.length === 0 && (
+                  <p className="text-sm text-slate-600">No hay registros de tensión arterial.</p>
+                )}
+                {bpHistory.map((record, idx) => (
+                  <div
+                    key={`${record.date}-${record.time}-${idx}`}
+                    className="flex items-center justify-between rounded-2xl border border-slate-100 bg-slate-50/70 p-4 shadow-sm"
+                  >
+                    <div>
+                      <p className="font-bold text-slate-900">
+                        {record.systolic} / {record.diastolic} mmHg
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        FC: {record.heart_rate ?? "--"} bpm
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm font-semibold text-slate-700">{record.date}</p>
+                      <p className="text-xs text-slate-500">{record.time}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+        )}
+
         {activeTab === "global" && (
           <section className="rounded-3xl border border-slate-100 bg-white p-6 shadow-lg shadow-sky-50 ring-1 ring-slate-100">
             <div className="flex items-center justify-between">
@@ -494,6 +631,81 @@ export default function PatientDetailPage() {
           </div>
         )}
       </div>
+
+      {/* BP MODAL */}
+      {bpModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl border border-slate-100 bg-white p-6 shadow-2xl shadow-sky-100">
+            <h3 className="mb-4 text-lg font-semibold text-slate-900">Agregar Tensión Arterial</h3>
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">Fecha</label>
+                  <input
+                    type="date"
+                    value={bpForm.date}
+                    onChange={(e) => setBpForm({ ...bpForm, date: e.target.value })}
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">Hora</label>
+                  <input
+                    type="time"
+                    value={bpForm.time}
+                    onChange={(e) => setBpForm({ ...bpForm, time: e.target.value })}
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">Sistólica</label>
+                  <input
+                    type="number"
+                    value={bpForm.systolic}
+                    onChange={(e) => setBpForm({ ...bpForm, systolic: parseInt(e.target.value) || 0 })}
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">Diastólica</label>
+                  <input
+                    type="number"
+                    value={bpForm.diastolic}
+                    onChange={(e) => setBpForm({ ...bpForm, diastolic: parseInt(e.target.value) || 0 })}
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Frecuencia Cardíaca</label>
+                <input
+                  type="number"
+                  value={bpForm.heart_rate}
+                  onChange={(e) => setBpForm({ ...bpForm, heart_rate: parseInt(e.target.value) || 0 })}
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
+                />
+              </div>
+            </div>
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                onClick={() => setBpModalOpen(false)}
+                className="rounded-xl px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={doAddBP}
+                disabled={addingBp}
+                className="rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white shadow-md shadow-sky-200 hover:bg-sky-700 disabled:opacity-70"
+              >
+                {addingBp ? "Guardando..." : "Guardar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* EDIT MODAL */}
       {editModalOpen && (
