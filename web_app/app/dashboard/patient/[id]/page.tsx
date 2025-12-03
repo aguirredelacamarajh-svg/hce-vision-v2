@@ -4,6 +4,15 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+} from "recharts";
+import {
   ExtractedData,
   fetchPatientSummary,
   GlobalEvent,
@@ -13,6 +22,44 @@ import {
 } from "../../../../lib/api";
 
 type Tab = "cardio" | "global";
+
+const TrendChart = ({
+  title,
+  data,
+  color = "#0284c7",
+}: {
+  title: string;
+  data: { date: string; value: number }[];
+  color?: string;
+}) => {
+  if (!data || data.length < 2) return null;
+
+  return (
+    <div className="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm shadow-sky-50">
+      <p className="mb-4 text-sm font-semibold uppercase tracking-wide text-slate-500">{title}</p>
+      <div className="h-48 w-full">
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={data}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+            <XAxis dataKey="date" tick={{ fontSize: 10 }} stroke="#94a3b8" />
+            <YAxis tick={{ fontSize: 10 }} stroke="#94a3b8" />
+            <Tooltip
+              contentStyle={{ borderRadius: "8px", border: "none", boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)" }}
+            />
+            <Line
+              type="monotone"
+              dataKey="value"
+              stroke={color}
+              strokeWidth={2}
+              dot={{ r: 3, fill: color }}
+              activeDot={{ r: 5 }}
+            />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+};
 
 export default function PatientDetailPage() {
   const params = useParams<{ id: string }>();
@@ -63,6 +110,12 @@ export default function PatientDetailPage() {
     const fromExtraction = extracted?.global_timeline_events ?? [];
     return fromExtraction.length ? fromExtraction : fromSummary;
   }, [summary?.global_timeline_events, extracted?.global_timeline_events]);
+
+  // Prepare Chart Data
+  const ldlData = summary?.lab_trends?.ldl?.map((d) => ({ date: d.date, value: d.value })) ?? [];
+  const creatinineData =
+    summary?.lab_trends?.creatinine?.map((d) => ({ date: d.date, value: d.value })) ?? [];
+  const bnpData = summary?.lab_trends?.bnp?.map((d) => ({ date: d.date, value: d.value })) ?? [];
 
   const handleFiles = (list: FileList | null) => {
     if (!list) return;
@@ -228,11 +281,10 @@ export default function PatientDetailPage() {
             <button
               key={tab.key}
               onClick={() => setActiveTab(tab.key as Tab)}
-              className={`flex-1 rounded-xl px-4 py-3 text-sm font-semibold transition ${
-                activeTab === tab.key
+              className={`flex-1 rounded-xl px-4 py-3 text-sm font-semibold transition ${activeTab === tab.key
                   ? "bg-white text-sky-700 shadow-sm ring-1 ring-sky-100"
                   : "text-slate-600 hover:text-sky-700"
-              }`}
+                }`}
             >
               {tab.label}
             </button>
@@ -247,6 +299,15 @@ export default function PatientDetailPage() {
                 {summary.clinical_summary?.length ? summary.clinical_summary : "Sin resumen disponible."}
               </p>
             </section>
+
+            {/* CHARTS SECTION */}
+            {(ldlData.length > 1 || creatinineData.length > 1 || bnpData.length > 1) && (
+              <section className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+                <TrendChart title="Tendencia LDL" data={ldlData} color="#0284c7" />
+                <TrendChart title="Tendencia Creatinina" data={creatinineData} color="#ea580c" />
+                <TrendChart title="Tendencia BNP" data={bnpData} color="#7c3aed" />
+              </section>
+            )}
 
             <section className="grid gap-4 md:grid-cols-3">
               {[
