@@ -277,7 +277,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
     }
   }
 
-  Future<void> _pickImage() async {
+  Future<void> _pickDocument() async {
     showModalBottomSheet(
       context: context,
       builder: (BuildContext context) {
@@ -286,10 +286,10 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
             children: <Widget>[
               ListTile(
                 leading: const Icon(Icons.photo_library),
-                title: const Text('Galería'),
+                title: const Text('Galería de Fotos'),
                 onTap: () {
                   Navigator.of(context).pop();
-                  _processImage(ImageSource.gallery);
+                  _pickFromSource(ImageSource.gallery);
                 },
               ),
               ListTile(
@@ -297,7 +297,15 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
                 title: const Text('Cámara'),
                 onTap: () {
                   Navigator.of(context).pop();
-                  _processImage(ImageSource.camera);
+                  _pickFromSource(ImageSource.camera);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.upload_file),
+                title: const Text('Subir Archivo (PDF/Imagen)'),
+                onTap: () {
+                  Navigator.of(context).pop();
+                  _pickFile();
                 },
               ),
             ],
@@ -305,6 +313,44 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
         );
       },
     );
+  }
+
+  Future<void> _pickFromSource(ImageSource source) async {
+    final picker = ImagePicker();
+    final pickedFile = await picker.pickImage(source: source);
+    if (pickedFile != null) {
+      _processDocument(pickedFile);
+    }
+  }
+
+  Future<void> _pickFile() async {
+    try {
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['pdf', 'jpg', 'jpeg', 'png'],
+      );
+
+      if (result != null) {
+        final file = result.files.single;
+        
+        // Validar tamaño (10MB = 10 * 1024 * 1024 bytes)
+        const int maxSize = 10 * 1024 * 1024;
+        if (file.size > maxSize) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('El archivo es demasiado grande. Máximo 10MB.')),
+            );
+          }
+          return;
+        }
+
+        // Convertir a XFile para compatibilidad con RemoteApi
+        final xFile = XFile(file.path!);
+        _processDocument(xFile);
+      }
+    } catch (e) {
+      print("Error picking file: $e");
+    }
   }
 
   Widget _buildStrategyRow(String label, String value, {bool isBold = false, Color? color}) {
@@ -326,45 +372,40 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
     );
   }
 
-  Future<void> _processImage(ImageSource source) async {
-    final picker = ImagePicker();
-    final pickedFile = await picker.pickImage(source: source);
-
-    if (pickedFile != null) {
-      setState(() => _isAnalyzing = true);
+  Future<void> _processDocument(XFile file) async {
+    setState(() => _isAnalyzing = true);
+    
+    try {
+      // 1. Enviar documento y obtener datos propuestos
+      final extractedData = await RemoteApi().extractData(_patient.id, file);
       
-      try {
-        // 1. Enviar imagen y obtener datos propuestos
-        final extractedData = await RemoteApi().extractData(_patient.id, pickedFile);
-        
-        if (!mounted) return;
+      if (!mounted) return;
 
-        // 2. Mostrar pantalla de confirmación
-        final result = await Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => ReviewAnalysisScreen(
-              patientId: _patient.id,
-              extractedData: extractedData,
-            ),
+      // 2. Mostrar pantalla de confirmación
+      final result = await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => ReviewAnalysisScreen(
+            patientId: _patient.id,
+            extractedData: extractedData,
           ),
-        );
+        ),
+      );
 
-        // 3. Si se confirmó, recargar datos
-        if (result == true) {
-          _refreshData();
-        }
-        
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Error analizando imagen: $e')),
-          );
-        }
-      } finally {
-        if (mounted) {
-          setState(() => _isAnalyzing = false);
-        }
+      // 3. Si se confirmó, recargar datos
+      if (result == true) {
+        _refreshData();
+      }
+      
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error analizando documento: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isAnalyzing = false);
       }
     }
   }
@@ -448,7 +489,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
               IconButton(
                 icon: const Icon(Icons.camera_alt_outlined),
                 tooltip: 'Analizar Documento',
-                onPressed: _isAnalyzing ? null : _pickImage,
+                onPressed: _isAnalyzing ? null : _pickDocument,
               ),
             ],
           ),

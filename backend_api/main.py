@@ -87,9 +87,9 @@ def fake_llm_extract(text: str) -> dict:
         "medications": []
     }
 
-def analyze_image_with_gemini(image_bytes: bytes) -> dict:
+def analyze_image_with_gemini(file_bytes: bytes, mime_type: str = "image/jpeg") -> dict:
     """
-    Envía la imagen a Gemini 1.5 Flash para extracción estructurada de datos clínicos.
+    Envía el documento (imagen o PDF) a Gemini 1.5 Flash para extracción estructurada.
     """
     if not GEMINI_API_KEY:
         print("⚠️ ADVERTENCIA: GEMINI_API_KEY no encontrada. Usando datos simulados.")
@@ -114,7 +114,7 @@ def analyze_image_with_gemini(image_bytes: bytes) -> dict:
             model = genai.GenerativeModel('models/gemini-pro-latest')
         
         prompt = """
-        Analiza este documento médico (imagen). Extrae la información clínica relevante y devuélvela EXCLUSIVAMENTE en formato JSON válido con la siguiente estructura exacta.
+        Analiza este documento médico (imagen o PDF). Extrae la información clínica relevante y devuélvela EXCLUSIVAMENTE en formato JSON válido con la siguiente estructura exacta.
         
         Estructura JSON requerida:
         {
@@ -167,9 +167,9 @@ def analyze_image_with_gemini(image_bytes: bytes) -> dict:
         }
         """
 
-        # Crear el contenido para el modelo (Prompt + Imagen)
+        # Crear el contenido para el modelo (Prompt + Archivo)
         response = model.generate_content([
-            {'mime_type': 'image/jpeg', 'data': image_bytes},
+            {'mime_type': mime_type, 'data': file_bytes},
             prompt
         ])
         
@@ -377,7 +377,7 @@ async def extract_data(
     summary = PatientSummary(**summary_data)
 
     content = await file.read()
-    raw_data = analyze_image_with_gemini(content)
+    raw_data = analyze_image_with_gemini(content, mime_type=file.content_type)
     
     temp_event = ClinicalEvent(
         id="temp_id", 
