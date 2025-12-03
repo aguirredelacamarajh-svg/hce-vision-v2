@@ -5,8 +5,6 @@ class ScoreDetail(BaseModel):
     value: float
     risk: str
 
-
-
 class Medication(BaseModel):
     name: str
     dose: Optional[str] = None
@@ -22,6 +20,12 @@ class ClinicalEvent(BaseModel):
     source: str = "IA"
     labs: Optional[Dict[str, Any]] = None
     diagnostics: Optional[List[str]] = None
+
+class GlobalEvent(BaseModel):
+    """Eventos para la historia clínica global (no cardiológica)."""
+    date: str
+    category: str # cirugia, trauma, infeccion, oncologia, otro
+    description: str
 
 class LabResult(BaseModel):
     date: str
@@ -62,6 +66,7 @@ class PatientSummary(BaseModel):
     lab_trends: Dict[str, List[LabResult]] = {} # Mapa: "LDL" -> [Resultados]
     risk_factors: List[str] = [] # "Tabaquismo", "Sedentarismo", "Obesidad"
     antecedents: Dict[str, bool] = {} # Nuevo campo para guardar el estado completo
+    global_timeline: List[GlobalEvent] = [] # NUEVO: Historia Global
     clinical_summary: str
     alerts: List[str]
 
@@ -83,14 +88,16 @@ class ExtractedData(BaseModel):
     medications: List[str]
     antecedents: Dict[str, bool]
     risk_scores: RiskScores
-    historical_data: List[HistoricalLab] = [] # Nuevo campo para tablas de datos
+    historical_data: List[HistoricalLab] = [] 
+    global_timeline_events: List[GlobalEvent] = [] # NUEVO
 
 class SubmitAnalysisRequest(BaseModel):
     patient_id: str
     event: ClinicalEvent
     medications: List[str]
     antecedents: Dict[str, bool]
-    historical_data: List[HistoricalLab] = [] # Nuevo campo
+    historical_data: List[HistoricalLab] = []
+    global_timeline_events: List[GlobalEvent] = [] # NUEVO
 
 class CreatePatientRequest(BaseModel):
     name: str
