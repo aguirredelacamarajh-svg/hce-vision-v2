@@ -13,6 +13,7 @@ import '../widgets/loading_widget.dart';
 import '../widgets/error_widget.dart';
 
 import 'package:image_picker/image_picker.dart';
+import 'package:file_picker/file_picker.dart';
 import 'review_analysis_screen.dart';
 
 class PatientDetailScreen extends StatefulWidget {
