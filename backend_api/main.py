@@ -518,10 +518,16 @@ async def extract_data(
     # Hack temporal: Devolver los eventos globales dentro de una estructura que el frontend pueda leer
     # O mejor, actualizaremos models.py en el siguiente paso para soportarlo oficialmente.
     
+    # Sanitize antecedents to ensure all values are booleans
+    sanitized_antecedents = {}
+    if raw_data.get("antecedents"):
+        for k, v in raw_data["antecedents"].items():
+            sanitized_antecedents[k] = safe_bool(v)
+
     return ExtractedData(
         event=temp_event,
         medications=raw_data["medications"] or [],
-        antecedents=raw_data["antecedents"] or {},
+        antecedents=sanitized_antecedents,
         risk_scores=proposed_scores,
         historical_data=raw_data.get("historical_data", []) 
         # TODO: Enviar global_timeline_events al frontend
@@ -696,6 +702,18 @@ async def update_patient_manual(patient_id: str, update_data: UpdatePatientReque
         
     if update_data.clinical_summary:
         summary.clinical_summary = update_data.clinical_summary
+
+    if update_data.lab_trends is not None:
+        summary.lab_trends = update_data.lab_trends
+
+    if update_data.blood_pressure_history is not None:
+        summary.blood_pressure_history = update_data.blood_pressure_history
+
+    if update_data.timeline is not None:
+        summary.timeline = update_data.timeline
+
+    if update_data.global_timeline is not None:
+        summary.global_timeline = update_data.global_timeline
         
     save_patient_db(db, summary)
     logger.info("✅ Paciente actualizado manualmente.")

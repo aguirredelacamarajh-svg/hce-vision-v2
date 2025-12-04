@@ -1,0 +1,60 @@
+/Users/jorgeaguirredelac/.gemini/antigravity/scratch/hce_vision_v2_dev/backend_api/main.py:78: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("startup")
+INFO:     Started server process [11762]
+INFO:     Waiting for application startup.
+2025-12-04 04:57:30,938 - hce_vision_backend - INFO - 🚀 Iniciando HCE Vision API v2.1 (Multi-Imagen + Historia Global)...
+2025-12-04 04:57:30,941 - hce_vision_backend - INFO - ✅ Gemini API Key configurada.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+2025-12-04 05:42:41,459 - hce_vision_backend - INFO - 📋 Listando todos los pacientes...
+2025-12-04 05:42:41,477 - hce_vision_backend - INFO - ✅ Se encontraron 2 pacientes.
+INFO:     127.0.0.1:54754 - "GET /patients HTTP/1.1" 200 OK
+2025-12-04 05:42:41,487 - hce_vision_backend - INFO - 📋 Listando todos los pacientes...
+2025-12-04 05:42:41,491 - hce_vision_backend - INFO - ✅ Se encontraron 2 pacientes.
+INFO:     127.0.0.1:54757 - "GET /patients HTTP/1.1" 200 OK
+2025-12-04 05:42:43,590 - hce_vision_backend - INFO - 🔍 Consultando summary de paciente: f2921942-ce45-4f4f-a89d-dd4862668467
+INFO:     127.0.0.1:54757 - "GET /patients/f2921942-ce45-4f4f-a89d-dd4862668467/summary HTTP/1.1" 200 OK
+2025-12-04 05:42:43,601 - hce_vision_backend - INFO - 🔍 Consultando summary de paciente: f2921942-ce45-4f4f-a89d-dd4862668467
+INFO:     127.0.0.1:54754 - "GET /patients/f2921942-ce45-4f4f-a89d-dd4862668467/summary HTTP/1.1" 200 OK
+2025-12-04 05:42:56,774 - hce_vision_backend - INFO - 📤 Recibida solicitud de análisis. Paciente: f2921942-ce45-4f4f-a89d-dd4862668467, Archivos: 1
+2025-12-04 05:42:56,776 - hce_vision_backend - INFO - 🧠 Enviando 1 documentos a Gemini (models/gemini-flash-latest)...
+2025-12-04 05:43:10,381 - hce_vision_backend - INFO - ✅ Respuesta de Gemini recibida y parseada.
+2025-12-04 05:43:10,382 - hce_vision_backend - INFO - ✅ Extracción multi-imagen completada.
+INFO:     127.0.0.1:54771 - "POST /extract_data HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54787 - "OPTIONS /submit_analysis HTTP/1.1" 200 OK
+2025-12-04 05:43:16,965 - hce_vision_backend - INFO - 💾 Guardando análisis confirmado para paciente: f2921942-ce45-4f4f-a89d-dd4862668467
+2025-12-04 05:43:16,976 - hce_vision_backend - INFO - ✅ Datos guardados exitosamente.
+INFO:     127.0.0.1:54787 - "POST /submit_analysis HTTP/1.1" 200 OK
+2025-12-04 05:43:16,980 - hce_vision_backend - INFO - 🔍 Consultando summary de paciente: f2921942-ce45-4f4f-a89d-dd4862668467
+INFO:     127.0.0.1:54787 - "GET /patients/f2921942-ce45-4f4f-a89d-dd4862668467/summary HTTP/1.1" 200 OK
+2025-12-04 05:43:33,838 - hce_vision_backend - INFO - 📤 Recibida solicitud de análisis. Paciente: f2921942-ce45-4f4f-a89d-dd4862668467, Archivos: 1
+2025-12-04 05:43:33,841 - hce_vision_backend - INFO - 🧠 Enviando 1 documentos a Gemini (models/gemini-flash-latest)...
+2025-12-04 05:43:47,901 - hce_vision_backend - INFO - ✅ Respuesta de Gemini recibida y parseada.
+2025-12-04 05:43:47,901 - hce_vision_backend - INFO - ✅ Extracción multi-imagen completada.
+INFO:     127.0.0.1:54789 - "POST /extract_data HTTP/1.1" 200 OK
+2025-12-04 05:43:54,223 - hce_vision_backend - INFO - 💾 Guardando análisis confirmado para paciente: f2921942-ce45-4f4f-a89d-dd4862668467
+2025-12-04 05:43:54,227 - hce_vision_backend - INFO - ✅ Datos guardados exitosamente.
+INFO:     127.0.0.1:54822 - "POST /submit_analysis HTTP/1.1" 200 OK
+2025-12-04 05:43:54,231 - hce_vision_backend - INFO - 🔍 Consultando summary de paciente: f2921942-ce45-4f4f-a89d-dd4862668467
+INFO:     127.0.0.1:54822 - "GET /patients/f2921942-ce45-4f4f-a89d-dd4862668467/summary HTTP/1.1" 200 OK
+2025-12-04 05:44:07,738 - hce_vision_backend - INFO - 💾 Guardando análisis confirmado para paciente: f2921942-ce45-4f4f-a89d-dd4862668467
+2025-12-04 05:44:07,742 - hce_vision_backend - INFO - ✅ Datos guardados exitosamente.
+INFO:     127.0.0.1:54830 - "POST /submit_analysis HTTP/1.1" 200 OK
+2025-12-04 05:44:07,762 - hce_vision_backend - INFO - 🔍 Consultando summary de paciente: f2921942-ce45-4f4f-a89d-dd4862668467
+INFO:     127.0.0.1:54830 - "GET /patients/f2921942-ce45-4f4f-a89d-dd4862668467/summary HTTP/1.1" 200 OK
+2025-12-04 05:44:08,877 - hce_vision_backend - INFO - 💾 Guardando análisis confirmado para paciente: f2921942-ce45-4f4f-a89d-dd4862668467
+2025-12-04 05:44:08,880 - hce_vision_backend - INFO - ✅ Datos guardados exitosamente.
+INFO:     127.0.0.1:54830 - "POST /submit_analysis HTTP/1.1" 200 OK
+2025-12-04 05:44:08,897 - hce_vision_backend - INFO - 🔍 Consultando summary de paciente: f2921942-ce45-4f4f-a89d-dd4862668467
+INFO:     127.0.0.1:54830 - "GET /patients/f2921942-ce45-4f4f-a89d-dd4862668467/summary HTTP/1.1" 200 OK
+2025-12-04 05:45:33,285 - hce_vision_backend - INFO - 📋 Listando todos los pacientes...
+2025-12-04 05:45:33,337 - hce_vision_backend - INFO - ✅ Se encontraron 2 pacientes.
+INFO:     127.0.0.1:54901 - "GET /patients HTTP/1.1" 200 OK
+2025-12-04 05:45:33,345 - hce_vision_backend - INFO - 📋 Listando todos los pacientes...
+2025-12-04 05:45:33,347 - hce_vision_backend - INFO - ✅ Se encontraron 2 pacientes.
+INFO:     127.0.0.1:54902 - "GET /patients HTTP/1.1" 200 OK

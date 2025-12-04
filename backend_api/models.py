@@ -119,4 +119,8 @@ class UpdatePatientRequest(BaseModel):
     risk_scores: Optional[RiskScores] = None
     medications: Optional[List[Medication]] = None
     clinical_summary: Optional[str] = None
+    lab_trends: Optional[Dict[str, List[LabResult]]] = None
+    blood_pressure_history: Optional[List[BloodPressureRecord]] = None
+    timeline: Optional[List[ClinicalEvent]] = None
+    global_timeline: Optional[List[GlobalEvent]] = None
 

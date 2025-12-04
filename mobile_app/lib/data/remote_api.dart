@@ -8,11 +8,9 @@ import 'package:flutter/foundation.dart';
 import 'dart:io' show Platform;
 
 class RemoteApi {
-  static String get baseUrl {
-    if (kIsWeb) return 'http://127.0.0.1:8000';
-    // IP Local de tu Mac para que el celular se conecte por Wi-Fi
-    return 'http://192.168.1.68:8000';
-  }
+  // static const String baseUrl = 'http://10.0.2.2:8000'; // Para emulador Android
+  // static const String baseUrl = 'http://localhost:8000'; // Para iOS simulador
+  static const String baseUrl = 'https://hce-vision-api.onrender.com'; // Producción Render
 
   Future<List<PatientSummary>> getPatients() async {
     final uri = Uri.parse('$baseUrl/patients');

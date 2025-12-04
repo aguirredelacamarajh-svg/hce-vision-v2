@@ -88,7 +88,10 @@ export default function PatientDetailPage() {
     age: number;
     sex: string;
     clinical_summary: string;
-  }>({ name: "", age: 0, sex: "", clinical_summary: "" });
+    chads2vasc: number;
+    has_bled: number;
+    score2: number;
+  }>({ name: "", age: 0, sex: "", clinical_summary: "", chads2vasc: 0, has_bled: 0, score2: 0 });
   const [updating, setUpdating] = useState(false);
 
   const [bpModalOpen, setBpModalOpen] = useState(false);
@@ -106,6 +109,115 @@ export default function PatientDetailPage() {
     heart_rate: 70,
   });
   const [addingBp, setAddingBp] = useState(false);
+  const [eventEditModalOpen, setEventEditModalOpen] = useState(false);
+  const [eventEditForm, setEventEditForm] = useState<{
+    index: number;
+    title: string;
+    date: string;
+    type: string;
+    description: string;
+  }>({ index: -1, title: "", date: "", type: "", description: "" });
+
+  const [labModalOpen, setLabModalOpen] = useState(false);
+
+  const doDeleteLabValue = async (labName: string, index: number) => {
+    if (!patientId || !summary?.lab_trends) return;
+    if (!confirm(`¿Eliminar valor de ${labName}?`)) return;
+
+    const newTrends = { ...summary.lab_trends };
+    if (newTrends[labName]) {
+      const newList = [...newTrends[labName]];
+      newList.splice(index, 1);
+      newTrends[labName] = newList;
+
+      try {
+        await updatePatient(patientId, {
+          lab_trends: newTrends,
+        });
+        const refreshed = await fetchPatientSummary(patientId);
+        setSummary(refreshed);
+      } catch (err) {
+        alert("Error eliminando valor de laboratorio");
+      }
+    }
+  };
+
+  const doDeleteBP = async (index: number) => {
+    if (!patientId || !summary?.blood_pressure_history) return;
+    if (!confirm("¿Eliminar este registro?")) return;
+
+    const newHistory = [...summary.blood_pressure_history];
+    newHistory.splice(index, 1); // Remove item at index (be careful with reverse mapping)
+    // Actually, the display is reversed: [...bpHistory].reverse(). So index 0 in display is last in array.
+    // Let's pass the actual record object or use the real index.
+    // Better: Filter by identity or use the real index from the original array.
+    // The map in the JSX uses `bpHistory.map((record, idx)`. `bpHistory` is `summary.blood_pressure_history`.
+    // So `idx` corresponds to the index in `summary.blood_pressure_history`.
+
+    // Wait, the display logic in JSX:
+    // {bpHistory.map((record, idx) => ...
+    // This iterates over the original array order (usually chronological if backend sorts it).
+    // If backend sorts descending (newest first), then idx 0 is newest.
+    // Backend: summary.blood_pressure_history.sort(key=lambda x: f"{x.date} {x.time}", reverse=True)
+    // So yes, idx 0 is newest.
+
+    try {
+      await updatePatient(patientId, {
+        blood_pressure_history: newHistory,
+      });
+      const refreshed = await fetchPatientSummary(patientId);
+      setSummary(refreshed);
+    } catch (err) {
+      alert("Error eliminando registro");
+    }
+  };
+
+  const openEventEditModal = (index: number, event: any) => {
+    setEventEditForm({
+      index,
+      title: event.title || "",
+      date: event.date || "",
+      type: event.type || "",
+      description: event.description || "",
+    });
+    setEventEditModalOpen(true);
+  };
+
+  const doUpdateEvent = async () => {
+    if (!patientId || !summary?.timeline) return;
+    const newTimeline = [...summary.timeline];
+    if (eventEditForm.index >= 0 && eventEditForm.index < newTimeline.length) {
+      newTimeline[eventEditForm.index] = {
+        ...newTimeline[eventEditForm.index],
+        title: eventEditForm.title,
+        date: eventEditForm.date,
+        type: eventEditForm.type,
+        description: eventEditForm.description,
+      };
+
+      try {
+        await updatePatient(patientId, {
+          timeline: newTimeline,
+        });
+        const refreshed = await fetchPatientSummary(patientId);
+        setSummary(refreshed);
+        setEventEditModalOpen(false);
+      } catch (err) {
+        alert("Error actualizando evento");
+      }
+    }
+  };
+
+  // ... (existing code)
+
+  // In JSX for BP History:
+  // <div className="text-right"> ... <button onClick={() => doDeleteBP(idx)}>🗑️</button> </div>
+
+  // In JSX for Timeline:
+  // <div className="flex items-center justify-between"> ... <button onClick={() => openEventEditModal(idx, event)}>✏️</button> </div>
+
+  // Add Event Edit Modal at the end
+
 
   useEffect(() => {
     let isMounted = true;
@@ -221,6 +333,9 @@ export default function PatientDetailPage() {
       age: summary.demographics.age,
       sex: summary.demographics.sex,
       clinical_summary: summary.clinical_summary || "",
+      chads2vasc: summary.risk_scores?.chads2vasc || 0,
+      has_bled: summary.risk_scores?.has_bled || 0,
+      score2: summary.risk_scores?.score2 || 0,
     });
     setEditModalOpen(true);
   };
@@ -236,6 +351,11 @@ export default function PatientDetailPage() {
           sex: editForm.sex,
         },
         clinical_summary: editForm.clinical_summary,
+        risk_scores: {
+          chads2vasc: editForm.chads2vasc,
+          has_bled: editForm.has_bled,
+          score2: editForm.score2,
+        },
       });
       const refreshed = await fetchPatientSummary(patientId);
       setSummary(refreshed);
@@ -394,12 +514,25 @@ export default function PatientDetailPage() {
             </section>
 
             {/* CHARTS SECTION */}
-            {(ldlData.length > 1 || creatinineData.length > 1 || bnpData.length > 1) && (
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-semibold uppercase tracking-wide text-sky-700">Tendencias</p>
+              <button
+                onClick={() => setLabModalOpen(true)}
+                className="text-xs font-semibold text-sky-600 hover:underline"
+              >
+                ⚙️ Gestionar Datos
+              </button>
+            </div>
+            {(ldlData.length > 0 || creatinineData.length > 0 || bnpData.length > 0) ? (
               <section className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-                <TrendChart title="Tendencia LDL" data={ldlData} color="#0284c7" />
-                <TrendChart title="Tendencia Creatinina" data={creatinineData} color="#ea580c" />
-                <TrendChart title="Tendencia BNP" data={bnpData} color="#7c3aed" />
+                {ldlData.length > 1 && <TrendChart title="Tendencia LDL" data={ldlData} color="#0284c7" />}
+                {creatinineData.length > 1 && <TrendChart title="Tendencia Creatinina" data={creatinineData} color="#ea580c" />}
+                {bnpData.length > 1 && <TrendChart title="Tendencia BNP" data={bnpData} color="#7c3aed" />}
               </section>
+            ) : (
+              <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 p-4 text-center text-sm text-slate-500">
+                No hay suficientes datos de laboratorio para mostrar gráficas.
+              </div>
             )}
 
             <section className="grid gap-4 md:grid-cols-3">
@@ -441,7 +574,15 @@ export default function PatientDetailPage() {
                     className="rounded-2xl border border-slate-100 bg-slate-50/70 p-4 shadow-sm"
                   >
                     <div className="flex items-center justify-between">
-                      <p className="text-sm font-semibold text-slate-900">{event.title ?? "Evento"}</p>
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-semibold text-slate-900">{event.title ?? "Evento"}</p>
+                        <button
+                          onClick={() => openEventEditModal(summary.timeline!.indexOf(event), event)}
+                          className="text-slate-400 hover:text-sky-600"
+                        >
+                          ✏️
+                        </button>
+                      </div>
                       <span className="text-xs text-slate-500">{event.date ?? "Sin fecha"}</span>
                     </div>
                     <p className="text-xs text-slate-600">Tipo: {event.type ?? "N/D"}</p>
@@ -571,6 +712,12 @@ export default function PatientDetailPage() {
                     <div className="text-right">
                       <p className="text-sm font-semibold text-slate-700">{record.date}</p>
                       <p className="text-xs text-slate-500">{record.time}</p>
+                      <button
+                        onClick={() => doDeleteBP(idx)}
+                        className="mt-1 text-xs text-red-400 hover:text-red-600"
+                      >
+                        🗑️ Eliminar
+                      </button>
                     </div>
                   </div>
                 ))}
@@ -753,6 +900,36 @@ export default function PatientDetailPage() {
                   className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
                 />
               </div>
+
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">CHA₂DS₂-VASc</label>
+                  <input
+                    type="number"
+                    value={editForm.chads2vasc}
+                    onChange={(e) => setEditForm({ ...editForm, chads2vasc: parseFloat(e.target.value) || 0 })}
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">HAS-BLED</label>
+                  <input
+                    type="number"
+                    value={editForm.has_bled}
+                    onChange={(e) => setEditForm({ ...editForm, has_bled: parseFloat(e.target.value) || 0 })}
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">SCORE2</label>
+                  <input
+                    type="number"
+                    value={editForm.score2}
+                    onChange={(e) => setEditForm({ ...editForm, score2: parseFloat(e.target.value) || 0 })}
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
+                  />
+                </div>
+              </div>
             </div>
             <div className="mt-6 flex justify-end gap-3">
               <button
@@ -768,6 +945,113 @@ export default function PatientDetailPage() {
               >
                 {updating ? "Guardando..." : "Guardar Cambios"}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* EVENT EDIT MODAL */}
+      {eventEditModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-lg rounded-2xl border border-slate-100 bg-white p-6 shadow-2xl shadow-sky-100">
+            <h3 className="mb-4 text-lg font-semibold text-slate-900">Editar Evento</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Título</label>
+                <input
+                  type="text"
+                  value={eventEditForm.title}
+                  onChange={(e) => setEventEditForm({ ...eventEditForm, title: e.target.value })}
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">Fecha</label>
+                  <input
+                    type="date"
+                    value={eventEditForm.date}
+                    onChange={(e) => setEventEditForm({ ...eventEditForm, date: e.target.value })}
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">Tipo</label>
+                  <input
+                    type="text"
+                    value={eventEditForm.type}
+                    onChange={(e) => setEventEditForm({ ...eventEditForm, type: e.target.value })}
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Descripción</label>
+                <textarea
+                  value={eventEditForm.description}
+                  onChange={(e) => setEventEditForm({ ...eventEditForm, description: e.target.value })}
+                  rows={4}
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
+                />
+              </div>
+            </div>
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                onClick={() => setEventEditModalOpen(false)}
+                className="rounded-xl px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={doUpdateEvent}
+                className="rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white shadow-md shadow-sky-200 hover:bg-sky-700"
+              >
+                Guardar Cambios
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* LAB MANAGEMENT MODAL */}
+      {labModalOpen && summary?.lab_trends && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-2xl rounded-2xl border border-slate-100 bg-white p-6 shadow-2xl shadow-sky-100 max-h-[80vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-slate-900">Gestionar Datos de Laboratorio</h3>
+              <button
+                onClick={() => setLabModalOpen(false)}
+                className="rounded-full bg-slate-100 px-3 py-1 text-sm font-semibold text-slate-600 hover:bg-slate-200"
+              >
+                Cerrar
+              </button>
+            </div>
+
+            <div className="space-y-6">
+              {Object.entries(summary.lab_trends).length === 0 && (
+                <p className="text-center text-slate-500">No hay datos de laboratorio registrados.</p>
+              )}
+              {Object.entries(summary.lab_trends).map(([labName, results]) => (
+                <div key={labName} className="rounded-xl border border-slate-100 bg-slate-50 p-4">
+                  <h4 className="mb-2 font-semibold text-slate-800 uppercase text-sm">{labName}</h4>
+                  <div className="space-y-2">
+                    {results.map((res, idx) => (
+                      <div key={`${res.date}-${idx}`} className="flex items-center justify-between bg-white p-2 rounded-lg border border-slate-100 shadow-sm">
+                        <div className="flex items-center gap-4">
+                          <span className="text-sm font-medium text-slate-900">{res.value} {res.unit}</span>
+                          <span className="text-xs text-slate-500">{res.date}</span>
+                        </div>
+                        <button
+                          onClick={() => doDeleteLabValue(labName, idx)}
+                          className="text-xs text-red-500 hover:text-red-700 hover:bg-red-50 px-2 py-1 rounded"
+                        >
+                          🗑️ Eliminar
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         </div>

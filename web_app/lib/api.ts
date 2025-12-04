@@ -137,6 +137,9 @@ export type UpdatePatientRequest = {
   risk_scores?: RiskScores;
   medications?: { name: string; dose?: string; schedule?: string; route?: string }[];
   clinical_summary?: string;
+  lab_trends?: Record<string, LabResult[]>;
+  blood_pressure_history?: BloodPressureRecord[];
+  timeline?: ClinicalEvent[];
 };
 
 export async function updatePatient(
