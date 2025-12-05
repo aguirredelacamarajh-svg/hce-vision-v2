@@ -41,7 +41,16 @@ logging.basicConfig(
 )
 logger = logging.getLogger("hce_vision_backend")
 
+from diagnostics.error_logger import ErrorLoggingMiddleware
+from diagnostics.client_error_logger import router as client_error_router
+
 app = FastAPI(title="HCE Vision API", version="2.1.0")
+
+# --- Middleware de Diagnóstico (MDIE) ---
+app.add_middleware(ErrorLoggingMiddleware)
+
+# --- Rutas de Diagnóstico ---
+app.include_router(client_error_router)
 
 # --- Middleware de CORS ---
 app.add_middleware(

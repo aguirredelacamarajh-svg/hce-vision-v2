@@ -1,0 +1,13 @@
+/Users/jorgeaguirredelac/.gemini/antigravity/scratch/hce_vision_v2_dev/backend_api/main.py:78: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("startup")
+INFO:     Started server process [59663]
+INFO:     Waiting for application startup.
+2025-12-05 00:54:12,315 - hce_vision_backend - INFO - 🚀 Iniciando HCE Vision API v2.1 (Multi-Imagen + Historia Global)...
+2025-12-05 00:54:12,316 - hce_vision_backend - INFO - ✅ Gemini API Key configurada.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
