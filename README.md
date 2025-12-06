@@ -1,33 +1,21 @@
-# HCE Vision
+# HCE Vision V2
 
-Bienvenido al repositorio de diseño y arquitectura de **HCE Vision**.
+Sistema avanzado de Historia Clínica Electrónica con visión artificial e IA.
 
-## Documentación
-El diseño completo del sistema se encuentra en:
-- [Documento de Diseño y Arquitectura (HCE_Vision_Design_Document.md)](./HCE_Vision_Design_Document.md)
+## Estructura del Proyecto
 
-## Estructura del Proyecto (Propuesta)
+- `web_app/`: Frontend en Next.js
+- `backend_api/`: Backend en FastAPI con integración a Gemini
+- `mobile_app/`: Aplicación móvil en Flutter
 
-```
-hce_vision/
-├── docs/                  # Documentación técnica y de producto
-├── mobile_app/            # Código fuente Flutter (iOS/Android)
-│   ├── lib/
-│   │   ├── core/          # Utilidades, configuración, tema
-│   │   ├── features/      # Módulos: auth, timeline, scanner, dashboard
-│   │   └── main.dart
-├── backend_api/           # API Python (FastAPI)
-│   ├── app/
-│   │   ├── api/           # Endpoints
-│   │   ├── core/          # Configuración, seguridad
-│   │   ├── models/        # Modelos de DB (SQLAlchemy/Pydantic)
-│   │   ├── services/      # Lógica de negocio (OCR, Scores, LLM)
-│   │   └── main.py
-├── ai_engine/             # Notebooks y scripts de entrenamiento/evaluación de prompts
-└── infrastructure/        # Terraform/Docker para despliegue
-```
+## Despliegue
 
-## Próximos Pasos
-1.  Revisar el documento de diseño.
-2.  Inicializar el proyecto Flutter en `mobile_app`.
-3.  Configurar el entorno virtual de Python en `backend_api`.
+- **Web:** Vercel (Root Directory: `web_app`)
+- **Backend:** Render (Docker)
+- **Mobile:** APK generado localmente
+
+## Estado Actual
+- ✅ Análisis de imágenes con Gemini 1.5 Flash
+- ✅ Gráficos de tendencias (LDL, Creatinina, BNP, Glucemia, Troponina)
+- ✅ Extracción de tablas históricas completas
+- ✅ Módulo de diagnóstico MDIE
