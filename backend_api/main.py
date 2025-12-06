@@ -127,47 +127,43 @@ def analyze_images_with_gemini(files_data: List[tuple[bytes, str]]) -> dict:
         model = genai.GenerativeModel(model_name)
         
         prompt = """
-        Eres un modelo clínico experto en cardiología e internista. Debes analizar uno o más DOCUMENTOS MÉDICOS (imágenes o PDFs) que pueden ser:
-        - Laboratorio (tablas, valores numéricos)
-        - Ecocardiograma / Imagen cardiovascular
-        - Resumen de internación (Epicrisis)
-        - Electrocardiograma
-        - Notas médicas, medicación
-        - Informes de urgencias o consultas
-        - Cualquier documento libre con datos clínicos
+        Eres un modelo clínico experto en cardiología e internista. Tu tarea es extraer datos de DOCUMENTOS MÉDICOS para una Historia Clínica Electrónica.
 
-        OBJETIVO:
-        Extraer y estructurar TODA la información relevante con la MÁXIMA sensibilidad y especificidad, para permitir al backend calcular scores cardiológicos, generar tendencias y construir una historia clínica global.
+        🚨 INSTRUCCIÓN CRÍTICA: DETECCIÓN DE TABLAS EVOLUTIVAS 🚨
+        Si el documento contiene una TABLA con resultados de laboratorio en MÚLTIPLES COLUMNAS (fechas distintas), es VITAL que extraigas TODAS las columnas, no solo la última.
+        
+        Ejemplo de cómo transformar una tabla:
+        [Tabla en imagen]
+        | Analítica | 01/01/2023 | 01/06/2023 | 01/01/2024 |
+        | LDL       | 150        | 130        | 100        |
+        
+        [Tu respuesta JSON debe generar esto en 'historical_data']
+        "historical_data": [
+            { "date": "2023-01-01", "labs": { "ldl": { "value": 150, "unit": "mg/dL" } } },
+            { "date": "2023-06-01", "labs": { "ldl": { "value": 130, "unit": "mg/dL" } } },
+            { "date": "2024-01-01", "labs": { "ldl": { "value": 100, "unit": "mg/dL" } } }
+        ]
 
-        TU RESPUESTA DEBE SER *EXCLUSIVAMENTE* un JSON VÁLIDO siguiendo esta estructura EXACTA:
+        OBJETIVO GENERAL:
+        Extraer y estructurar TODA la información relevante con la MÁXIMA sensibilidad.
+
+        TU RESPUESTA DEBE SER *EXCLUSIVAMENTE* un JSON VÁLIDO siguiendo esta estructura:
 
         {
-            "date": "YYYY-MM-DD", // Fecha del documento más relevante. Si no hay, usa la fecha de hoy.
+            "date": "YYYY-MM-DD", // Fecha del documento más reciente.
             "type": "laboratorio" | "imagen" | "medicacion" | "epicrisis" | "procedimiento" | "consulta" | "otro",
-
             "title": "Texto breve descriptivo",
-            "description": "Resumen clínico conciso de los hallazgos.",
+            "description": "Resumen clínico conciso.",
 
             "antecedents": {
-                "hta": boolean,
-                "diabetes": boolean,
-                "heart_failure": boolean,
-                "atrial_fibrillation": boolean,
-                "acs_history": boolean,
-                "stroke": boolean,
-                "vascular_disease": boolean,
-                "renal_disease": boolean,
-                "liver_disease": boolean,
-                "bleeding_history": boolean,
-                "labile_inr": boolean,
-                "alcohol_drugs": boolean,
-                "smoking": boolean,
-                "obesity": boolean,
-                "sedentary": boolean,
-                "dyslipidemia": boolean
+                "hta": boolean, "diabetes": boolean, "heart_failure": boolean, "atrial_fibrillation": boolean,
+                "acs_history": boolean, "stroke": boolean, "vascular_disease": boolean, "renal_disease": boolean,
+                "liver_disease": boolean, "bleeding_history": boolean, "labile_inr": boolean, "alcohol_drugs": boolean,
+                "smoking": boolean, "obesity": boolean, "sedentary": boolean, "dyslipidemia": boolean
             },
 
-            "labs": {
+            "labs": { 
+                // AQUÍ SOLO VA LA COLUMNA MÁS RECIENTE
                 "ldl": { "value": number, "unit": "mg/dL" } | null,
                 "hdl": { "value": number, "unit": "mg/dL" } | null,
                 "total_cholesterol": { "value": number, "unit": "mg/dL" } | null,
@@ -184,71 +180,37 @@ def analyze_images_with_gemini(files_data: List[tuple[bytes, str]]) -> dict:
             },
 
             "cardio_parameters": {
-                "lvef": number | null,
-                "lv_mass": number | null,
-                "ivsd": number | null,
-                "pw_thickness": number | null,
-                "tapse": number | null,
-                "rv_function": "normal" | "disminuida" | null,
-                "aortic_valve_area": number | null,
-                "mean_gradient_av": number | null,
-                "pulmonary_pressure": number | null
+                "lvef": number | null, "lv_mass": number | null, "ivsd": number | null, "pw_thickness": number | null,
+                "tapse": number | null, "rv_function": "normal" | "disminuida" | null, "aortic_valve_area": number | null,
+                "mean_gradient_av": number | null, "pulmonary_pressure": number | null
             },
 
             "historical_data": [
+                // AQUÍ VAN LAS COLUMNAS ANTERIORES DE LA TABLA
                 {
                     "date": "YYYY-MM-DD",
                     "labs": {
                         "ldl": { "value": number, "unit": "mg/dL" },
-                        "hdl": { "value": number, "unit": "mg/dL" },
-                        "glucose": { "value": number, "unit": "mg/dL" },
-                        "creatinine": { "value": number, "unit": "mg/dL" },
                         "bnp": { "value": number, "unit": "pg/mL" },
                         "troponin": { "value": number, "unit": "ng/L" },
-                        "hba1c": { "value": number, "unit": "%" }
+                        "glucose": { "value": number, "unit": "mg/dL" },
+                        // ... otros labs
                     }
                 }
             ],
 
-            "medications": [
-                "Nombre medicamento",
-                "Otro medicamento"
-            ],
-            
-            "global_timeline_events": [
-                {
-                    "date": "YYYY-MM-DD", 
-                    "category": "cirugia" | "trauma" | "infeccion" | "oncologia" | "otro",
-                    "description": "Descripción breve del evento"
-                }
-            ],
-
-            "scores_detected": {
-                "grace": number | null,
-                "crusade": number | null,
-                "killip": number | null,
-                "timirisk": number | null,
-                "syntax": number | null,
-                "cha2ds2vasc": number | null,
-                "hasbled": number | null,
-                "score2": number | null,
-                "framingham": number | null,
-                "ascvd": number | null
-            }
+            "medications": ["Nombre medicamento", "Otro medicamento"],
+            "global_timeline_events": [ { "date": "YYYY-MM-DD", "category": "...", "description": "..." } ],
+            "scores_detected": { "grace": number | null, "crusade": number | null, "killip": number | null, "timirisk": number | null, "syntax": number | null, "cha2ds2vasc": number | null, "hasbled": number | null, "score2": number | null, "framingham": number | null, "ascvd": number | null }
         }
 
         REGLAS DE ORO:
-        1. Si el documento tiene TABLAS con múltiples columnas (fechas), DEBES extraer CADA COLUMNA como una entrada separada en 'historical_data'. ¡No te quedes solo con la última!
-        2. Si aparecen valores en texto libre (ej: “LDL 178 mg/dL”), EXTRÁELOS igual.
-        3. Si no estás seguro, NO inventes: usar null.
-        4. Detecta antecedentes aunque estén implícitos.
-        5. Detecta diagnósticos cardiológicos clave.
-        6. Si hay múltiples fechas, intenta elegir la del estudio más reciente para el objeto principal, y el resto a 'historical_data'.
-        7. Extrae medicaciones en texto libre y recetas.
-        8. Detecta signos ecocardiográficos.
-        9. Extrae eventos NO cardiológicos importantes en 'global_timeline_events'.
-        10. SOLO devuelve el JSON.
-        11. IMPORTANTE: "TNI", "TnI", "Troponina I", "TnT" son TROPONINA. Extráelo en el campo 'troponin'.
+        1. PRIORIDAD MÁXIMA: Si ves una tabla con fechas en columnas, DESGLÓSALA en 'historical_data'.
+        2. ⛔️ PROHIBIDO devolver "YYYY-MM-DD" literal. Busca la fecha en la cabecera de la columna (ej: "12/05/23", "Ene 2024"). Si no tiene año, asume el año actual o el del documento.
+        3. Si un valor es "< 10", extrae "10" (numérico).
+        4. "TNI", "TnI", "Troponina I", "TnT" -> 'troponin'.
+        5. "Glucosa", "Glicemia" -> 'glucose'.
+        6. SOLO devuelve el JSON.
         """
 
         # Construir el payload con Prompt + Todos los archivos (con su mime type)
@@ -592,7 +554,61 @@ async def submit_analysis(data: SubmitAnalysisRequest, db: Session = Depends(get
     summary.antecedents = data.antecedents
     
     # --- ACTUALIZAR TENDENCIAS DE LABORATORIO ---
+    # --- ACTUALIZAR TENDENCIAS DE LABORATORIO ---
+    
+    # Debug Payload
+    logger.info(f"📦 Submit Payload received. Historical Data count: {len(data.historical_data)}")
+    # logger.info(f"Payload content: {data.json()}") # Uncomment for full verbose log
+
+    # 1. Procesar datos históricos extraídos (tablas, múltiples fechas)
+    if data.historical_data:
+        for hist_item in data.historical_data:
+            hist_date = hist_item.date
+            logger.info(f"   🗓️ Procesando histórico fecha: {hist_date}")
+            
+            for lab_name, lab_data in hist_item.labs.items():
+                try:
+                    val_float = None
+                    unit_str = ""
+                    
+                    if isinstance(lab_data, dict) and 'value' in lab_data:
+                        val_float = float(lab_data['value']) if lab_data['value'] is not None else None
+                        unit_str = lab_data.get('unit', "")
+                    elif isinstance(lab_data, (int, float)):
+                        val_float = float(lab_data)
+                    elif isinstance(lab_data, str):
+                        import re
+                        match = re.search(r"[-+]?\d*\.\d+|\d+", lab_data)
+                        if match:
+                            val_float = float(match.group())
+
+                    if val_float is not None:
+                        if lab_name not in summary.lab_trends:
+                            summary.lab_trends[lab_name] = []
+                        
+                        # RELAXED DUPLICATE CHECK FOR DEBUGGING
+                        # Solo evitar si es EXACTAMENTE la misma fecha y valor
+                        exists = any(
+                            r.date == hist_date and r.value == val_float
+                            for r in summary.lab_trends[lab_name]
+                        )
+                        
+                        if not exists:
+                            logger.info(f"      ✅ Insertando {lab_name}: {val_float} {unit_str} ({hist_date})")
+                            summary.lab_trends[lab_name].append(LabResult(
+                                date=hist_date,
+                                value=val_float,
+                                unit=unit_str
+                            ))
+                        else:
+                            logger.info(f"      ⚠️ Duplicado exacto encontrado para {lab_name} en {hist_date}, saltando.")
+                            
+                except Exception as e:
+                    logger.warning(f"⚠️ Error procesando histórico {lab_name} ({hist_date}): {e}")
+
+    # 2. Procesar el evento actual (fecha principal)
     if new_event.labs:
+        logger.info(f"   📍 Procesando evento actual: {new_event.date}")
         for lab_name, lab_data in new_event.labs.items():
             try:
                 val_float = None
@@ -613,14 +629,29 @@ async def submit_analysis(data: SubmitAnalysisRequest, db: Session = Depends(get
                     if lab_name not in summary.lab_trends:
                         summary.lab_trends[lab_name] = []
                     
-                    summary.lab_trends[lab_name].append(LabResult(
-                        date=new_event.date,
-                        value=val_float,
-                        unit=unit_str
-                    ))
-                    summary.lab_trends[lab_name].sort(key=lambda x: x.date)
+                    # Evitar duplicados con lo que acabamos de insertar de historical_data
+                    exists = any(
+                        r.date == new_event.date and r.value == val_float
+                        for r in summary.lab_trends[lab_name]
+                    )
+                    
+                    if not exists:
+                        logger.info(f"      ✅ Insertando actual {lab_name}: {val_float} {unit_str}")
+                        summary.lab_trends[lab_name].append(LabResult(
+                            date=new_event.date,
+                            value=val_float,
+                            unit=unit_str
+                        ))
+                    else:
+                        logger.info(f"      ⚠️ Duplicado actual encontrado para {lab_name}, saltando.")
+
             except Exception as e:
-                logger.warning(f"⚠️ Error procesando lab {lab_name}: {e}")
+                logger.warning(f"⚠️ Error procesando lab actual {lab_name}: {e}")
+
+    # 3. Ordenar todas las tendencias por fecha
+    for lab_name in summary.lab_trends:
+        summary.lab_trends[lab_name].sort(key=lambda x: x.date)
+        logger.info(f"📈 Tendencia final {lab_name}: {len(summary.lab_trends[lab_name])} puntos")
 
     # Alertas
     summary.alerts = [] 

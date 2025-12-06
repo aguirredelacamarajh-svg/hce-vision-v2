@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
+import 'package:http_parser/http_parser.dart'; // Added
 import '../models/patient_summary.dart';
 import '../models/extraction_models.dart';
 import 'package:flutter/foundation.dart';
@@ -79,11 +80,25 @@ class RemoteApi {
     if (kIsWeb) {
       final bytes = await image.readAsBytes();
       request.files.add(
-        http.MultipartFile.fromBytes('file', bytes, filename: image.name),
+        http.MultipartFile.fromBytes(
+          'files',
+          bytes,
+          filename: image.name,
+          contentType: MediaType('image', 'jpeg'),
+        ),
       );
     } else {
+      var mimeType = MediaType('image', 'jpeg');
+      if (image.path.toLowerCase().endsWith('.png')) {
+        mimeType = MediaType('image', 'png');
+      }
+      
       request.files.add(
-        await http.MultipartFile.fromPath('file', image.path),
+        await http.MultipartFile.fromPath(
+          'files',
+          image.path,
+          contentType: mimeType,
+        ),
       );
     }
 
@@ -99,10 +114,12 @@ class RemoteApi {
 
   Future<PatientSummary> submitAnalysis(SubmitAnalysisRequest data) async {
     final uri = Uri.parse('$baseUrl/submit_analysis');
+    final body = jsonEncode(data.toJson());
+    print("🚀 Sending Submit Analysis: $body");
     final response = await http.post(
       uri,
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode(data.toJson()),
+      body: body,
     );
 
     if (response.statusCode == 200) {

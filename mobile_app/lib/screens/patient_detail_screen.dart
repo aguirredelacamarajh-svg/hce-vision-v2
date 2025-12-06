@@ -801,6 +801,10 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
                           ),
                           const SizedBox(height: 12),
                           ..._summary!.labTrends.entries.map((entry) {
+                            print("📊 Chart for ${entry.key}: ${entry.value.length} points");
+                            for (var e in entry.value) {
+                              print("   - ${e.date}: ${e.value}");
+                            }
                             return Padding(
                               padding: const EdgeInsets.only(bottom: 16.0),
                               child: LabTrendChart(

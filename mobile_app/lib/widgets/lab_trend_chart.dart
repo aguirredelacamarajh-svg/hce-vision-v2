@@ -73,26 +73,42 @@ class LabTrendChart extends StatelessWidget {
                       showTitles: true,
                       reservedSize: 30,
                       interval: 1,
-                      getTitlesWidget: (value, meta) {
-                        final index = value.toInt();
-                        if (index >= 0 && index < dates.length) {
-                          // Mostrar solo fecha corta (ej: 12/05)
-                          final dateParts = dates[index].split('-');
-                          if (dateParts.length >= 3) {
-                            return Padding(
-                              padding: const EdgeInsets.only(top: 8.0),
-                              child: Text(
-                                "${dateParts[2]}/${dateParts[1]}",
-                                style: const TextStyle(
-                                  color: Colors.grey,
-                                  fontSize: 10,
+                        getTitlesWidget: (value, meta) {
+                          final index = value.toInt();
+                          if (index >= 0 && index < dates.length) {
+                            final dateStr = dates[index];
+                            try {
+                              // Intentar parsear como ISO 8601 primero
+                              final date = DateTime.parse(dateStr);
+                              return Padding(
+                                padding: const EdgeInsets.only(top: 8.0),
+                                child: Text(
+                                  "${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}",
+                                  style: const TextStyle(
+                                    color: Colors.grey,
+                                    fontSize: 10,
+                                  ),
                                 ),
-                              ),
-                            );
+                              );
+                            } catch (e) {
+                              // Fallback a lógica manual si falla
+                              final dateParts = dateStr.split('-');
+                              if (dateParts.length >= 3) {
+                                return Padding(
+                                  padding: const EdgeInsets.only(top: 8.0),
+                                  child: Text(
+                                    "${dateParts[2].substring(0, 2)}/${dateParts[1]}",
+                                    style: const TextStyle(
+                                      color: Colors.grey,
+                                      fontSize: 10,
+                                    ),
+                                  ),
+                                );
+                              }
+                            }
                           }
-                        }
-                        return const Text('');
-                      },
+                          return const Text('');
+                        },
                     ),
                   ),
                   leftTitles: AxisTitles(
