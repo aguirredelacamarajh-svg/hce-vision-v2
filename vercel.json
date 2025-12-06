@@ -1,0 +1,10 @@
+{
+    "version": 2,
+    "rewrites": [
+        {
+            "source": "/(.*)",
+            "destination": "/web_app/$1"
+        }
+    ],
+    "framework": "nextjs"
+}
