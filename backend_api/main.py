@@ -175,6 +175,7 @@ def analyze_images_with_gemini(files_data: List[tuple[bytes, str]]) -> dict:
                 "creatinine": { "value": number, "unit": "mg/dL" } | null,
                 "bnp": { "value": number, "unit": "pg/mL" } | null,
                 "ntprobnp": { "value": number, "unit": "pg/mL" } | null,
+                "troponin": { "value": number, "unit": "ng/L" } | null,
                 "hemoglobin": { "value": number, "unit": "g/dL" } | null,
                 "hba1c": { "value": number, "unit": "%" } | null,
                 "glucose": { "value": number, "unit": "mg/dL" } | null,
@@ -201,7 +202,10 @@ def analyze_images_with_gemini(files_data: List[tuple[bytes, str]]) -> dict:
                         "ldl": { "value": number, "unit": "mg/dL" },
                         "hdl": { "value": number, "unit": "mg/dL" },
                         "glucose": { "value": number, "unit": "mg/dL" },
-                        "creatinine": { "value": number, "unit": "mg/dL" }
+                        "creatinine": { "value": number, "unit": "mg/dL" },
+                        "bnp": { "value": number, "unit": "pg/mL" },
+                        "troponin": { "value": number, "unit": "ng/L" },
+                        "hba1c": { "value": number, "unit": "%" }
                     }
                 }
             ],
@@ -234,16 +238,17 @@ def analyze_images_with_gemini(files_data: List[tuple[bytes, str]]) -> dict:
         }
 
         REGLAS DE ORO:
-        1. Si el documento tiene TABLAS, debes leerlas aunque estén torcidas, incompletas o borrosas.
+        1. Si el documento tiene TABLAS con múltiples columnas (fechas), DEBES extraer CADA COLUMNA como una entrada separada en 'historical_data'. ¡No te quedes solo con la última!
         2. Si aparecen valores en texto libre (ej: “LDL 178 mg/dL”), EXTRÁELOS igual.
         3. Si no estás seguro, NO inventes: usar null.
         4. Detecta antecedentes aunque estén implícitos.
         5. Detecta diagnósticos cardiológicos clave.
-        6. Si hay múltiples fechas, intenta elegir la del estudio más reciente.
+        6. Si hay múltiples fechas, intenta elegir la del estudio más reciente para el objeto principal, y el resto a 'historical_data'.
         7. Extrae medicaciones en texto libre y recetas.
         8. Detecta signos ecocardiográficos.
         9. Extrae eventos NO cardiológicos importantes en 'global_timeline_events'.
         10. SOLO devuelve el JSON.
+        11. IMPORTANTE: "TNI", "TnI", "Troponina I", "TnT" son TROPONINA. Extráelo en el campo 'troponin'.
         """
 
         # Construir el payload con Prompt + Todos los archivos (con su mime type)

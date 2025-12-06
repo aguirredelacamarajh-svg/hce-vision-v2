@@ -34,7 +34,7 @@ const TrendChart = ({
   data: { date: string; value: number }[];
   color?: string;
 }) => {
-  if (!data || data.length < 2) return null;
+  if (!data || data.length < 1) return null;
 
   return (
     <div className="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm shadow-sky-50">
@@ -251,15 +251,49 @@ export default function PatientDetailPage() {
   }, [summary?.global_timeline_events, extracted?.global_timeline_events]);
 
   // Prepare Chart Data
-  const ldlData = summary?.lab_trends?.ldl?.map((d) => ({ date: d.date, value: d.value })) ?? [];
-  const creatinineData =
-    summary?.lab_trends?.creatinine?.map((d) => ({ date: d.date, value: d.value })) ?? [];
-  const bnpData = summary?.lab_trends?.bnp?.map((d) => ({ date: d.date, value: d.value })) ?? [];
+  // Helper to merge summary data with extracted preview data
+  const mergeLabData = (labKey: string) => {
+    const fromSummary = summary?.lab_trends?.[labKey]?.map((d) => ({ date: d.date, value: d.value })) ?? [];
+
+    // Try to find data in extracted historical_data
+    const fromExtracted: { date: string; value: number }[] = [];
+    if (extracted?.historical_data) {
+      extracted.historical_data.forEach((item) => {
+        const date = (item.date as string) || new Date().toISOString().split("T")[0];
+        const labs = item.labs as Record<string, { value: number; unit: string }>;
+        if (labs && labs[labKey]) {
+          fromExtracted.push({ date, value: labs[labKey].value });
+        }
+      });
+    }
+
+    // Also check current extraction "labs" object
+    // @ts-ignore
+    const currentLabs = extracted?.labs as Record<string, { value: number; unit: string }>;
+    if (currentLabs && currentLabs[labKey]) {
+      fromExtracted.push({
+        date: (extracted as any).date || new Date().toISOString().split("T")[0],
+        value: currentLabs[labKey].value
+      });
+    }
+
+    // Merge and sort by date
+    const combined = [...fromSummary, ...fromExtracted];
+    return combined.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  };
+
+  const ldlData = mergeLabData("ldl");
+  const creatinineData = mergeLabData("creatinine");
+  const bnpData = mergeLabData("bnp");
+  const glucoseData = mergeLabData("glucose");
+  const troponinData = mergeLabData("troponin");
 
   const bpHistory = summary?.blood_pressure_history ?? [];
   const bpChartData = [...bpHistory]
     .reverse()
     .map((r) => ({ date: r.date, systolic: r.systolic, diastolic: r.diastolic }));
+
+
 
   const handleFiles = (list: FileList | null) => {
     if (!list) return;
@@ -523,11 +557,13 @@ export default function PatientDetailPage() {
                 ⚙️ Gestionar Datos
               </button>
             </div>
-            {(ldlData.length > 0 || creatinineData.length > 0 || bnpData.length > 0) ? (
+            {(ldlData.length > 0 || creatinineData.length > 0 || bnpData.length > 0 || glucoseData.length > 0 || troponinData.length > 0) ? (
               <section className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-                {ldlData.length > 1 && <TrendChart title="Tendencia LDL" data={ldlData} color="#0284c7" />}
-                {creatinineData.length > 1 && <TrendChart title="Tendencia Creatinina" data={creatinineData} color="#ea580c" />}
-                {bnpData.length > 1 && <TrendChart title="Tendencia BNP" data={bnpData} color="#7c3aed" />}
+                {ldlData.length > 0 && <TrendChart title="Tendencia LDL" data={ldlData} color="#0284c7" />}
+                {creatinineData.length > 0 && <TrendChart title="Tendencia Creatinina" data={creatinineData} color="#ea580c" />}
+                {bnpData.length > 0 && <TrendChart title="Tendencia BNP" data={bnpData} color="#7c3aed" />}
+                {glucoseData.length > 0 && <TrendChart title="Tendencia Glucemia" data={glucoseData} color="#16a34a" />}
+                {troponinData.length > 0 && <TrendChart title="Tendencia Troponina" data={troponinData} color="#dc2626" />}
               </section>
             ) : (
               <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 p-4 text-center text-sm text-slate-500">
