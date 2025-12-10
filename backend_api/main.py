@@ -25,7 +25,8 @@ from models import (
     LipidManagement,
     LabResult,
     BloodPressureRecord,
-    UpdatePatientRequest
+    UpdatePatientRequest,
+    DigitalReport
 )
 from database import init_db, get_db, save_patient_db, get_patient_db, get_all_patients_db, delete_patient_db
 
@@ -108,7 +109,19 @@ def fake_llm_extract(text: str) -> dict:
         "antecedents": {"hta": True, "diabetes": False},
         "labs": {},
         "medications": [],
-        "global_timeline_events": []
+        "global_timeline_events": [],
+        # Simulación de nuevos campos
+        "raw_text": "Texto simulado del informe...",
+        "lab_table_full": [],
+        "imaging_findings": [],
+        "procedures": [],
+        "vital_signs": None,
+        "medication_changes": [],
+        "document_metadata": {"institution": "Simulated Hospital"},
+        "digital_report_draft": {
+            "format": "markdown",
+            "content": "# Informe Simulado\n\nEste es un informe generado porque no hay conexión con IA."
+        }
     }
 
 def analyze_images_with_gemini(files_data: List[tuple[bytes, str]]) -> dict:
@@ -128,32 +141,17 @@ def analyze_images_with_gemini(files_data: List[tuple[bytes, str]]) -> dict:
         
         prompt = """
         Eres un modelo clínico experto en cardiología e internista. Tu tarea es extraer datos de DOCUMENTOS MÉDICOS para una Historia Clínica Electrónica.
-
-        🚨 INSTRUCCIÓN CRÍTICA: DETECCIÓN DE TABLAS EVOLUTIVAS 🚨
-        Si el documento contiene una TABLA con resultados de laboratorio en MÚLTIPLES COLUMNAS (fechas distintas), es VITAL que extraigas TODAS las columnas, no solo la última.
         
-        Ejemplo de cómo transformar una tabla:
-        [Tabla en imagen]
-        | Analítica | 01/01/2023 | 01/06/2023 | 01/01/2024 |
-        | LDL       | 150        | 130        | 100        |
+        🚨 INSTRUCCIÓN CRÍTICA: DIGITALIZACIÓN COMPLETA 🚨
+        Tu objetivo no es solo extraer un resumen, sino CAPTURAR TODA la información del documento para crear una versión digital fidedigna y estructurada.
         
-        [Tu respuesta JSON debe generar esto en 'historical_data']
-        "historical_data": [
-            { "date": "2023-01-01", "labs": { "ldl": { "value": 150, "unit": "mg/dL" } } },
-            { "date": "2023-06-01", "labs": { "ldl": { "value": 130, "unit": "mg/dL" } } },
-            { "date": "2024-01-01", "labs": { "ldl": { "value": 100, "unit": "mg/dL" } } }
-        ]
-
-        OBJETIVO GENERAL:
-        Extraer y estructurar TODA la información relevante con la MÁXIMA sensibilidad.
-
-        TU RESPUESTA DEBE SER *EXCLUSIVAMENTE* un JSON VÁLIDO siguiendo esta estructura:
+        Debes devolver un JSON VÁLIDO con la siguiente estructura COMPLETA:
 
         {
-            "date": "YYYY-MM-DD", // Fecha del documento más reciente.
+            "date": "YYYY-MM-DD", // Fecha del documento. Usar null si no se encuentra.
             "type": "laboratorio" | "imagen" | "medicacion" | "epicrisis" | "procedimiento" | "consulta" | "otro",
-            "title": "Texto breve descriptivo",
-            "description": "Resumen clínico conciso.",
+            "title": "Título descriptivo del documento",
+            "description": "Resumen clínico conciso del contenido.",
 
             "antecedents": {
                 "hta": boolean, "diabetes": boolean, "heart_failure": boolean, "atrial_fibrillation": boolean,
@@ -163,54 +161,79 @@ def analyze_images_with_gemini(files_data: List[tuple[bytes, str]]) -> dict:
             },
 
             "labs": { 
-                // AQUÍ SOLO VA LA COLUMNA MÁS RECIENTE
-                "ldl": { "value": number, "unit": "mg/dL" } | null,
-                "hdl": { "value": number, "unit": "mg/dL" } | null,
-                "total_cholesterol": { "value": number, "unit": "mg/dL" } | null,
-                "triglycerides": { "value": number, "unit": "mg/dL" } | null,
-                "creatinine": { "value": number, "unit": "mg/dL" } | null,
-                "bnp": { "value": number, "unit": "pg/mL" } | null,
-                "ntprobnp": { "value": number, "unit": "pg/mL" } | null,
-                "troponin": { "value": number, "unit": "ng/L" } | null,
-                "hemoglobin": { "value": number, "unit": "g/dL" } | null,
-                "hba1c": { "value": number, "unit": "%" } | null,
-                "glucose": { "value": number, "unit": "mg/dL" } | null,
-                "potassium": { "value": number, "unit": "mEq/L" } | null,
-                "sodium": { "value": number, "unit": "mEq/L" } | null
-            },
-
-            "cardio_parameters": {
-                "lvef": number | null, "lv_mass": number | null, "ivsd": number | null, "pw_thickness": number | null,
-                "tapse": number | null, "rv_function": "normal" | "disminuida" | null, "aortic_valve_area": number | null,
-                "mean_gradient_av": number | null, "pulmonary_pressure": number | null
+                // AQUÍ SOLO VA LA COLUMNA MÁS RECIENTE DETECTADA
+                "ldl": { "value": number, "unit": "mg/dL" },
+                // ... (resto de laboratorios igual que antes)
+                "creatinine": { "value": number, "unit": "mg/dL" },
+                # INCLUIR TODOS LOS LABS PREVIOS: bnp, ntprobnp, troponin, hemoglobin, hba1c, glucose, potassium, sodium, etc.
             },
 
             "historical_data": [
-                // AQUÍ VAN LAS COLUMNAS ANTERIORES DE LA TABLA
+                 { "date": "YYYY-MM-DD", "labs": { ... } } // Columnas anteriores de tablas evolutivas
+            ],
+
+            "medications": [ "Nombre medicamento 1", "Nombre medicamento 2" ],
+
+            // --- NUEVOS CAMPOS DE DIGITALIZACIÓN COMPLETA ---
+            
+            "raw_text": "TEXTO CRUDO COMPLETO DEL INFORME (OCR)",
+
+            "lab_table_full": [
                 {
-                    "date": "YYYY-MM-DD",
-                    "labs": {
-                        "ldl": { "value": number, "unit": "mg/dL" },
-                        "bnp": { "value": number, "unit": "pg/mL" },
-                        "troponin": { "value": number, "unit": "ng/L" },
-                        "glucose": { "value": number, "unit": "mg/dL" },
-                        // ... otros labs
-                    }
+                    "row_raw": "texto completo de la fila",
+                    "test_name_raw": "nombre original",
+                    "normalized_test_name": "nombre estandarizado si es posible",
+                    "value_raw": "valor tal como aparece",
+                    "value": number | null,
+                    "unit": "unidades",
+                    "reference_range_raw": "rango de referencia si aparece",
+                    "flag_raw": "indicador H/L/*"
                 }
             ],
 
-            "medications": ["Nombre medicamento", "Otro medicamento"],
-            "global_timeline_events": [ { "date": "YYYY-MM-DD", "category": "...", "description": "..." } ],
-            "scores_detected": { "grace": number | null, "crusade": number | null, "killip": number | null, "timirisk": number | null, "syntax": number | null, "cha2ds2vasc": number | null, "hasbled": number | null, "score2": number | null, "framingham": number | null, "ascvd": number | null }
+            "diagnostics_detected": [
+                 { "label_raw": "texto hallazgo", "category": "diagnostico_principal | secundario | hallazgo" }
+            ],
+
+            "imaging_findings": [
+                 { 
+                    "section": "Sección (ej: VI)", 
+                    "text": "Hallazgo textual",
+                    "structured": { "lvef": number, "severity": "leve|mod|sev" }
+                 }
+            ],
+
+            "procedures": [
+                 { "date": "YYYY-MM-DD", "type": "...", "description": "..." }
+            ],
+
+            "vital_signs": {
+                 "blood_pressure": { "systolic": number, "diastolic": number, "unit": "mmHg" },
+                 "heart_rate": { "value": number, "unit": "lpm" },
+                 "weight": { "value": number, "unit": "kg" },
+                 "height": { "value": number, "unit": "cm" },
+                 "bmi": number
+            },
+
+            "medication_changes": [
+                 { "name_raw": "...", "action": "iniciar|suspender|ajustar", "dose_raw": "..." }
+            ],
+
+            "document_metadata": {
+                 "institution": "...", "service": "...", "physician": "..."
+            },
+
+            "digital_report_draft": {
+                "format": "markdown",
+                "content": "Genera aquí un reporte LEGIBLE en Markdown que replique el informe original. \nEstructura SUGERIDA:\n# [Institución] - [Tipo de Informe]\n**Fecha:** [Fecha] | **Paciente:** [Nombre si hay]\n\n## Resumen / Motivo\n...\n\n## Hallazgos / Laboratorio\n(Tabla o lista bonita)\n\n## Conclusiones\n...\n\nRecrea el formato visual del papel lo mejor posible usando Markdown."
+            }
         }
 
-        REGLAS DE ORO:
-        1. PRIORIDAD MÁXIMA: Si ves una tabla con fechas en columnas, DESGLÓSALA en 'historical_data'.
-        2. ⛔️ PROHIBIDO devolver "YYYY-MM-DD" literal. Busca la fecha en la cabecera de la columna (ej: "12/05/23", "Ene 2024"). Si no tiene año, asume el año actual o el del documento.
-        3. Si un valor es "< 10", extrae "10" (numérico).
-        4. "TNI", "TnI", "Troponina I", "TnT" -> 'troponin'.
-        5. "Glucosa", "Glicemia" -> 'glucose'.
-        6. SOLO devuelve el JSON.
+        REGLAS:
+        1. SOLO JSON VÁLIDO.
+        2. Si hay tablas evolutivas, usa 'historical_data'.
+        3. 'raw_text' debe contener todo el texto extraído.
+        4. Sé exhaustivo con 'lab_table_full' para capturar valores que no encajan en 'labs'.
         """
 
         # Construir el payload con Prompt + Todos los archivos (con su mime type)
@@ -445,6 +468,7 @@ async def extract_data(
     raw_data = analyze_images_with_gemini(files_data)
     
     # Crear evento temporal principal (Cardio)
+    # Crear evento temporal principal (Cardio)
     temp_event = ClinicalEvent(
         id="temp_id", 
         date=raw_data["date"] or datetime.date.today().isoformat(),
@@ -452,8 +476,17 @@ async def extract_data(
         title=raw_data["title"] or "Documentos Analizados",
         description=raw_data["description"] or "",
         labs=raw_data["labs"],
-        diagnostics=[],
-        source="IA (Pendiente)"
+        diagnostics=[d.get("normalized_name") or d.get("label_raw") for d in raw_data.get("diagnostics_detected", [])],
+        source="IA (Pendiente)",
+        # Nuevos campos
+        raw_text=raw_data.get("raw_text"),
+        lab_table_full=raw_data.get("lab_table_full"),
+        imaging_findings=raw_data.get("imaging_findings"),
+        procedures=raw_data.get("procedures"),
+        vital_signs=raw_data.get("vital_signs"),
+        medication_changes=raw_data.get("medication_changes"),
+        document_metadata=raw_data.get("document_metadata"),
+        digital_report_draft=raw_data.get("digital_report_draft")
     )
 
     # Calcular scores cardio
@@ -763,6 +796,53 @@ async def update_patient_manual(patient_id: str, update_data: UpdatePatientReque
     save_patient_db(db, summary)
     logger.info("✅ Paciente actualizado manualmente.")
     return summary
+
+@app.get("/patients/{patient_id}/events/{event_id}/digital_report", response_model=DigitalReport)
+async def get_digital_report(patient_id: str, event_id: str, db: Session = Depends(get_db)):
+    """
+    Recupera el informe digital (Markdown/HTML) de un evento específico.
+    Si no existe el borrador guardado, intenta generarlo al vuelo con los datos estructurados.
+    """
+    summary_data = get_patient_db(db, patient_id)
+    if not summary_data:
+        raise HTTPException(status_code=404, detail="Paciente no encontrado")
+    summary = PatientSummary(**summary_data)
+
+    target_event = None
+    for evt in summary.timeline:
+        if evt.id == event_id:
+            target_event = evt
+            break
+    
+    if not target_event:
+        raise HTTPException(status_code=404, detail="Evento no encontrado")
+
+    # 1. Si ya tiene el reporte guardado, devolverlo
+    if target_event.digital_report_draft:
+        return DigitalReport(**target_event.digital_report_draft)
+
+    # 2. Si no, generarlo al vuelo (Fallback básico)
+    logger.info(f"⚠️ Evento {event_id} sin reporte digital guardado. Generando fallback...")
+    
+    generated_content = f"# Informe: {target_event.title}\n\n"
+    generated_content += f"**Fecha:** {target_event.date} | **Tipo:** {target_event.type}\n\n"
+    
+    if target_event.description:
+        generated_content += f"## Resumen\n{target_event.description}\n\n"
+
+    if target_event.raw_text:
+        generated_content += f"## Texto Original (OCR)\n{target_event.raw_text[:500]}...\n(Texto truncado)\n\n"
+
+    if target_event.labs:
+        generated_content += "## Laboratorio (Valores principales)\n"
+        for k, v in target_event.labs.items():
+            if v and isinstance(v, dict):
+                generated_content += f"- **{k}:** {v.get('value')} {v.get('unit')}\n"
+    
+    return DigitalReport(
+        format="markdown",
+        content=generated_content
+    )
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

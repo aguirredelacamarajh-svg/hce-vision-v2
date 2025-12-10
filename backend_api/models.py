@@ -11,6 +11,10 @@ class Medication(BaseModel):
     schedule: Optional[str] = None
     route: Optional[str] = None
 
+class DigitalReport(BaseModel):
+    format: str  # "markdown" o "html"
+    content: str
+
 class ClinicalEvent(BaseModel):
     id: str
     date: str
@@ -20,6 +24,16 @@ class ClinicalEvent(BaseModel):
     source: str = "IA"
     labs: Optional[Dict[str, Any]] = None
     diagnostics: Optional[List[str]] = None
+
+    # NUEVO: Campos para captura completa de información
+    raw_text: Optional[str] = None
+    lab_table_full: Optional[List[Dict[str, Any]]] = None
+    imaging_findings: Optional[List[Dict[str, Any]]] = None
+    procedures: Optional[List[Dict[str, Any]]] = None
+    vital_signs: Optional[Dict[str, Any]] = None
+    medication_changes: Optional[List[Dict[str, Any]]] = None
+    document_metadata: Optional[Dict[str, Any]] = None
+    digital_report_draft: Optional[Dict[str, Any]] = None
 
 class GlobalEvent(BaseModel):
     """Eventos para la historia clínica global (no cardiológica)."""
